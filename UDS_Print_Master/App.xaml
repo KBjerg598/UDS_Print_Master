@@ -1,9 +1,23 @@
-﻿<Application x:Class="UDS_Print_Master.App"
+<Application x:Class="UDS_Print_Master.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:UDS_Print_Master"
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <materialDesign:BundledTheme BaseTheme="Light"
+                                             PrimaryColor="Blue"
+                                             SecondaryColor="Cyan" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F5F7FB" />
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AppInkBrush" Color="#111827" />
+            <SolidColorBrush x:Key="AppMutedBrush" Color="#64748B" />
+            <SolidColorBrush x:Key="AppLineBrush" Color="#E2E8F0" />
+            <SolidColorBrush x:Key="AppSoftBlueBrush" Color="#EAF2FF" />
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

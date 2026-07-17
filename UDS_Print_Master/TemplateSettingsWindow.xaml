@@ -1,0 +1,251 @@
+<Window x:Class="UDS_Print_Master.TemplateSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+        Title="Детальная настройка шаблона"
+        Width="1060"
+        Height="730"
+        MinWidth="980"
+        MinHeight="660"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}"
+        Icon="Assets/UISI-Logo-BW.ico"
+        Style="{StaticResource MaterialDesignWindow}"
+        TextElement.Foreground="{StaticResource AppInkBrush}"
+        TextElement.FontFamily="{DynamicResource MaterialDesignFont}"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <Style x:Key="PanelTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource AppInkBrush}" />
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+
+        <Style x:Key="SmallMutedText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource AppMutedBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="SettingsComboBox" TargetType="ComboBox" BasedOn="{StaticResource MaterialDesignOutlinedComboBox}">
+            <Setter Property="Margin" Value="0,8,0,0" />
+            <Setter Property="MinHeight" Value="48" />
+        </Style>
+
+        <Style x:Key="SettingsTextBox" TargetType="TextBox" BasedOn="{StaticResource MaterialDesignOutlinedTextBox}">
+            <Setter Property="Margin" Value="0,8,0,0" />
+            <Setter Property="MinHeight" Value="48" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="90" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="56" />
+        </Grid.RowDefinitions>
+
+        <materialDesign:Card Padding="18"
+                             Background="{StaticResource AppSurfaceBrush}"
+                             materialDesign:ElevationAssist.Elevation="Dp2">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Width="54"
+                        Height="54"
+                        Background="#111827"
+                        CornerRadius="14"
+                        Padding="6">
+                    <Image Source="Assets/UISI-Logo-BW.png"
+                           Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1"
+                            Margin="14,0,0,0"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="Детальный шаблон"
+                               FontSize="24"
+                               FontWeight="Bold" />
+                    <TextBlock Text="{Binding PreviewTitle}"
+                               Style="{StaticResource SmallMutedText}"
+                               FontSize="13"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Grid>
+        </materialDesign:Card>
+
+        <Grid Grid.Row="1" Margin="0,16,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <materialDesign:Card Grid.Column="0"
+                                 Padding="20"
+                                 Background="{StaticResource AppSurfaceBrush}"
+                                 materialDesign:ElevationAssist.Elevation="Dp2"
+                                 Margin="0,0,16,0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,0,6,0">
+                    <StackPanel>
+                        <TextBlock Text="Параметры текста" Style="{StaticResource PanelTitle}" />
+
+                        <ComboBox ItemsSource="{Binding FontFamilies}"
+                                  SelectedItem="{Binding PrintTemplate.FontFamily, Mode=TwoWay}"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  materialDesign:HintAssist.Hint="Шрифт" />
+
+                        <Grid Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="56" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Размер текста" Style="{StaticResource SmallMutedText}" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding PrintTemplate.FontSize, StringFormat={}{0:0}}"
+                                       Foreground="{StaticResource AppMutedBrush}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                        <Slider Minimum="8"
+                                Maximum="28"
+                                TickFrequency="1"
+                                IsSnapToTickEnabled="True"
+                                Value="{Binding PrintTemplate.FontSize, Mode=TwoWay}"
+                                Margin="0,2,0,0" />
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="56" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Межстрочный интервал" Style="{StaticResource SmallMutedText}" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding PrintTemplate.LineSpacing, StringFormat={}{0:0.00}}"
+                                       Foreground="{StaticResource AppMutedBrush}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                        <Slider Minimum="1"
+                                Maximum="2"
+                                TickFrequency="0.05"
+                                Value="{Binding PrintTemplate.LineSpacing, Mode=TwoWay}"
+                                Margin="0,2,0,0" />
+
+                        <Separator Margin="0,18" />
+
+                        <TextBlock Text="Поля страницы, мм" Style="{StaticResource PanelTitle}" />
+                        <UniformGrid Columns="2" Rows="2">
+                            <TextBox Text="{Binding PrintTemplate.MarginTop, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsTextBox}"
+                                     materialDesign:HintAssist.Hint="Сверху"
+                                     Margin="0,0,8,8" />
+                            <TextBox Text="{Binding PrintTemplate.MarginRight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsTextBox}"
+                                     materialDesign:HintAssist.Hint="Справа"
+                                     Margin="0,0,0,8" />
+                            <TextBox Text="{Binding PrintTemplate.MarginBottom, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsTextBox}"
+                                     materialDesign:HintAssist.Hint="Снизу"
+                                     Margin="0,0,8,0" />
+                            <TextBox Text="{Binding PrintTemplate.MarginLeft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsTextBox}"
+                                     materialDesign:HintAssist.Hint="Слева"
+                                     Margin="0" />
+                        </UniformGrid>
+
+                        <Separator Margin="0,18" />
+
+                        <TextBlock Text="Оформление" Style="{StaticResource PanelTitle}" />
+                        <CheckBox Content="Показывать имя файла в заголовке"
+                                  IsChecked="{Binding PrintTemplate.IncludeFileNameHeader, Mode=TwoWay}"
+                                  Style="{StaticResource MaterialDesignCheckBox}" />
+                        <CheckBox Content="Добавлять дату печати в конце"
+                                  IsChecked="{Binding PrintTemplate.IncludePrintedAtFooter, Mode=TwoWay}"
+                                  Style="{StaticResource MaterialDesignCheckBox}" />
+                        <CheckBox Content="Переносить длинные строки"
+                                  IsChecked="{Binding PrintTemplate.WordWrap, Mode=TwoWay}"
+                                  Style="{StaticResource MaterialDesignCheckBox}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </materialDesign:Card>
+
+            <materialDesign:Card Grid.Column="1"
+                                 Padding="20"
+                                 Background="{StaticResource AppSurfaceBrush}"
+                                 materialDesign:ElevationAssist.Elevation="Dp2">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal"
+                                Margin="0,0,0,14">
+                        <materialDesign:PackIcon Kind="EyeOutline"
+                                                 Width="24"
+                                                 Height="24"
+                                                 Foreground="#2563EB"
+                                                 Margin="0,0,8,0" />
+                        <TextBlock Text="Предпросмотр печатного листа"
+                                   FontSize="20"
+                                   FontWeight="SemiBold" />
+                    </StackPanel>
+
+                    <Border Grid.Row="1"
+                            Background="#E9EEF5"
+                            BorderBrush="{StaticResource AppLineBrush}"
+                            BorderThickness="1"
+                            CornerRadius="16"
+                            Padding="18">
+                        <Border x:Name="DetailFlowPreviewHost"
+                                Background="#E9EEF5"
+                                BorderBrush="#CBD5E1"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Cursor="Hand"
+                                PreviewMouseLeftButtonDown="PreviewDrag_MouseLeftButtonDown"
+                                PreviewMouseMove="PreviewDrag_MouseMove"
+                                PreviewMouseLeftButtonUp="PreviewDrag_MouseLeftButtonUp"
+                                MouseLeave="PreviewDrag_MouseLeave">
+                            <FlowDocumentScrollViewer x:Name="PreviewViewer"
+                                                      IsToolBarVisible="False"
+                                                      Zoom="80"
+                                                      MinZoom="55"
+                                                      MaxZoom="140"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Auto" />
+                        </Border>
+                    </Border>
+                </Grid>
+            </materialDesign:Card>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="1"
+                    Style="{StaticResource MaterialDesignOutlinedButton}"
+                    Click="Cancel_Click"
+                    Margin="0,0,10,0"
+                    Padding="18,0">
+                <TextBlock Text="Отмена" />
+            </Button>
+            <Button Grid.Column="2"
+                    Style="{StaticResource MaterialDesignRaisedButton}"
+                    Click="Apply_Click"
+                    Padding="18,0">
+                <StackPanel Orientation="Horizontal">
+                    <materialDesign:PackIcon Kind="Check"
+                                             Width="20"
+                                             Height="20"
+                                             Margin="0,0,8,0" />
+                    <TextBlock Text="Применить" />
+                </StackPanel>
+            </Button>
+        </Grid>
+    </Grid>
+</Window>

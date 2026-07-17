@@ -1,24 +1,2764 @@
-﻿using System.Text;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
+using Microsoft.Win32;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Printing;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using System.Windows.Threading;
+using UDS_Print_Master.Models;
+using UDS_Print_Master.Services;
 
-namespace UDS_Print_Master
+namespace UDS_Print_Master;
+
+public partial class MainWindow : Window, INotifyPropertyChanged
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
-    public partial class MainWindow : Window
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        public MainWindow()
+        ".txt", ".log", ".csv", ".json", ".xml", ".md", ".markdown", ".ini", ".cfg", ".config",
+        ".sql", ".html", ".htm", ".css", ".js", ".ts", ".cs", ".xaml", ".yaml", ".yml"
+    };
+
+    private static readonly HashSet<string> DocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".docx", ".rtf"
+    };
+
+    private static readonly HashSet<string> PdfExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf"
+    };
+
+    private static readonly HashSet<string> SupportedExtensions = new(
+        TextExtensions.Concat(DocumentExtensions).Concat(PdfExtensions),
+        StringComparer.OrdinalIgnoreCase);
+
+    private static readonly char[] Windows1251Chars =
+    [
+        '\u0402', '\u0403', '\u201A', '\u0453', '\u201E', '\u2026', '\u2020', '\u2021',
+        '\u20AC', '\u2030', '\u0409', '\u2039', '\u040A', '\u040C', '\u040B', '\u040F',
+        '\u0452', '\u2018', '\u2019', '\u201C', '\u201D', '\u2022', '\u2013', '\u2014',
+        '\uFFFD', '\u2122', '\u0459', '\u203A', '\u045A', '\u045C', '\u045B', '\u045F',
+        '\u00A0', '\u040E', '\u045E', '\u0408', '\u00A4', '\u0490', '\u00A6', '\u00A7',
+        '\u0401', '\u00A9', '\u0404', '\u00AB', '\u00AC', '\u00AD', '\u00AE', '\u0407',
+        '\u00B0', '\u00B1', '\u0406', '\u0456', '\u0491', '\u00B5', '\u00B6', '\u00B7',
+        '\u0451', '\u2116', '\u0454', '\u00BB', '\u0458', '\u0405', '\u0455', '\u0457',
+        '\u0410', '\u0411', '\u0412', '\u0413', '\u0414', '\u0415', '\u0416', '\u0417',
+        '\u0418', '\u0419', '\u041A', '\u041B', '\u041C', '\u041D', '\u041E', '\u041F',
+        '\u0420', '\u0421', '\u0422', '\u0423', '\u0424', '\u0425', '\u0426', '\u0427',
+        '\u0428', '\u0429', '\u042A', '\u042B', '\u042C', '\u042D', '\u042E', '\u042F',
+        '\u0430', '\u0431', '\u0432', '\u0433', '\u0434', '\u0435', '\u0436', '\u0437',
+        '\u0438', '\u0439', '\u043A', '\u043B', '\u043C', '\u043D', '\u043E', '\u043F',
+        '\u0440', '\u0441', '\u0442', '\u0443', '\u0444', '\u0445', '\u0446', '\u0447',
+        '\u0448', '\u0449', '\u044A', '\u044B', '\u044C', '\u044D', '\u044E', '\u044F'
+    ];
+
+    private PrintTemplate? _selectedTemplate;
+    private string _selectedPrinterName = string.Empty;
+    private string _currentPrintingFile = "Очередь не запущена";
+    private string _overallStatus = "Добавьте файлы и выберите шаблон печати.";
+    private string _conversionStatus = "Готово к конвертации.";
+    private double _progressValue;
+    private double _conversionProgressValue;
+    private bool _isPrinting;
+    private bool _isConverting;
+    private bool _useOneTemplateForAll = true;
+    private bool _isAdvancedSettingsEnabled;
+    private int _previewVersion;
+    private bool _isPreviewDragging;
+    private Point _previewDragStart;
+    private double _previewDragStartHorizontalOffset;
+    private double _previewDragStartVerticalOffset;
+    private ScrollViewer? _previewScrollViewer;
+    private bool _isPdfPreviewDragging;
+    private Point _pdfPreviewDragStart;
+    private readonly HashSet<string> _temporaryPdfFiles = new(StringComparer.OrdinalIgnoreCase);
+    private string? _currentPreviewPdfPath;
+    private readonly WiaScannerService _scannerService = new();
+    private readonly PrinterWakeService _printerWakeService = new();
+    private ScannerDeviceInfo? _selectedScanner;
+    private ScannerCapabilities? _selectedScannerCapabilities;
+    private ScanPageItem? _selectedScanPage;
+    private BitmapSource? _selectedScanPreview;
+    private string _selectedScanSource = "Flatbed";
+    private string _selectedScanMode = "Simplex";
+    private string _selectedScanColorMode = "Color";
+    private int _selectedScanDpi = 300;
+    private string _scanStatus = "Выберите сканер и источник бумаги.";
+    private string _scanBaseFileName = "Скан";
+    private bool _isScanning;
+    private bool _isSavingScans;
+    private bool _isWakingScanner;
+    private bool _suppressScannerCapabilityLoading;
+    private bool _startNextScanAsNewDocument;
+    private int _scannerCapabilitiesVersion;
+    private CancellationTokenSource? _scanCancellation;
+    private CancellationTokenSource? _scannerWakeCancellation;
+
+    public MainWindow()
+    {
+        InitializeComponent();
+
+        Files.CollectionChanged += Files_CollectionChanged;
+        ConversionFiles.CollectionChanged += ConversionFiles_CollectionChanged;
+        ScanPages.CollectionChanged += ScanPages_CollectionChanged;
+        DataContext = this;
+
+        LoadTemplates();
+        LoadPrinters();
+        Loaded += MainWindow_Loaded;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public ObservableCollection<PrintFileItem> Files { get; } = [];
+
+    public ObservableCollection<PrintFileItem> ConversionFiles { get; } = [];
+
+    public ObservableCollection<PrintTemplate> Templates { get; } = [];
+
+    public ObservableCollection<string> PrinterNames { get; } = [];
+
+    public ObservableCollection<ScannerDeviceInfo> Scanners { get; } = [];
+
+    public ObservableCollection<int> AvailableScanDpi { get; } = [150, 300, 600];
+
+    public ObservableCollection<ScanPageItem> ScanPages { get; } = [];
+
+    public ObservableCollection<string> FontFamilies { get; } =
+    [
+        "Segoe UI",
+        "Arial",
+        "Calibri",
+        "Consolas",
+        "Courier New",
+        "Times New Roman",
+        "Verdana",
+        "Tahoma"
+    ];
+
+    public PrintTemplate? SelectedTemplate
+    {
+        get => _selectedTemplate;
+        set
         {
-            InitializeComponent();
+            if (_selectedTemplate == value)
+            {
+                return;
+            }
+
+            if (_selectedTemplate is not null)
+            {
+                _selectedTemplate.PropertyChanged -= SelectedTemplate_PropertyChanged;
+            }
+
+            _selectedTemplate = value;
+
+            if (_selectedTemplate is not null)
+            {
+                _selectedTemplate.PropertyChanged += SelectedTemplate_PropertyChanged;
+            }
+
+            OnPropertyChanged();
+            if (IsLoaded)
+            {
+                UpdatePreview();
+            }
         }
+    }
+
+    public string SelectedPrinterName
+    {
+        get => _selectedPrinterName;
+        set => SetProperty(ref _selectedPrinterName, value);
+    }
+
+    public string CurrentPrintingFile
+    {
+        get => _currentPrintingFile;
+        set => SetProperty(ref _currentPrintingFile, value);
+    }
+
+    public string OverallStatus
+    {
+        get => _overallStatus;
+        set => SetProperty(ref _overallStatus, value);
+    }
+
+    public string ConversionStatus
+    {
+        get => _conversionStatus;
+        set => SetProperty(ref _conversionStatus, value);
+    }
+
+    public double ProgressValue
+    {
+        get => _progressValue;
+        set => SetProperty(ref _progressValue, value);
+    }
+
+    public double ConversionProgressValue
+    {
+        get => _conversionProgressValue;
+        set => SetProperty(ref _conversionProgressValue, value);
+    }
+
+    public bool UseOneTemplateForAll
+    {
+        get => _useOneTemplateForAll;
+        set => SetProperty(ref _useOneTemplateForAll, value);
+    }
+
+    public bool IsAdvancedSettingsEnabled
+    {
+        get => _isAdvancedSettingsEnabled;
+        set => SetProperty(ref _isAdvancedSettingsEnabled, value);
+    }
+
+    public ScannerDeviceInfo? SelectedScanner
+    {
+        get => _selectedScanner;
+        set
+        {
+            if (!SetProperty(ref _selectedScanner, value))
+            {
+                return;
+            }
+
+            if (!_suppressScannerCapabilityLoading && IsLoaded && MainWorkspaceTabs.SelectedIndex == 2)
+            {
+                _ = LoadSelectedScannerCapabilitiesAsync();
+            }
+
+            OnPropertyChanged(nameof(CanStartScan));
+        }
+    }
+
+    public ScanPageItem? SelectedScanPage
+    {
+        get => _selectedScanPage;
+        set
+        {
+            if (SetProperty(ref _selectedScanPage, value))
+            {
+                SelectedScanPreview = value is null ? null : LoadScanBitmap(value.ImagePath, 1100);
+            }
+        }
+    }
+
+    public BitmapSource? SelectedScanPreview
+    {
+        get => _selectedScanPreview;
+        private set => SetProperty(ref _selectedScanPreview, value);
+    }
+
+    public string SelectedScanSource
+    {
+        get => _selectedScanSource;
+        set
+        {
+            if (SetProperty(ref _selectedScanSource, value))
+            {
+                OnPropertyChanged(nameof(CanStartScan));
+            }
+        }
+    }
+
+    public string SelectedScanMode
+    {
+        get => _selectedScanMode;
+        set
+        {
+            if (SetProperty(ref _selectedScanMode, value))
+            {
+                OnPropertyChanged(nameof(CanStartScan));
+            }
+        }
+    }
+
+    public string SelectedScanColorMode
+    {
+        get => _selectedScanColorMode;
+        set => SetProperty(ref _selectedScanColorMode, value);
+    }
+
+    public int SelectedScanDpi
+    {
+        get => _selectedScanDpi;
+        set => SetProperty(ref _selectedScanDpi, value);
+    }
+
+    public string ScanStatus
+    {
+        get => _scanStatus;
+        set => SetProperty(ref _scanStatus, value);
+    }
+
+    public string ScanBaseFileName
+    {
+        get => _scanBaseFileName;
+        set => SetProperty(ref _scanBaseFileName, value);
+    }
+
+    public string ScanPagesSummary => ScanPages.Count == 0
+        ? "Страницы ещё не отсканированы"
+        : $"Страниц: {ScanPages.Count} · документов: {GetScanDocumentCount()}";
+
+    public string ScannerCapabilityText
+    {
+        get
+        {
+            if (_selectedScannerCapabilities is null)
+            {
+                return SelectedScanner is null ? "Сканер не выбран" : "Получение возможностей устройства...";
+            }
+
+            var sources = new List<string>();
+            if (_selectedScannerCapabilities.HasFlatbed)
+            {
+                sources.Add("планшет");
+            }
+
+            if (_selectedScannerCapabilities.HasFeeder)
+            {
+                sources.Add("ADF");
+            }
+
+            var duplex = _selectedScannerCapabilities.SupportsDuplex
+                ? "двустороннее сканирование доступно"
+                : "только одностороннее сканирование";
+            return $"Источники: {string.Join(", ", sources)} · {duplex}";
+        }
+    }
+
+    public bool CanPrint => Files.Count > 0 && !IsPrinting && !IsConverting && !IsScanning && !IsSavingScans;
+
+    public bool CanConvert => ConversionFiles.Count > 0 && !IsConverting && !IsPrinting && !IsScanning && !IsSavingScans;
+
+    public bool CanStartScan => SelectedScanner is not null
+                                && _selectedScannerCapabilities is not null
+                                && !IsScanning
+                                && !IsSavingScans
+                                && !IsWakingScanner
+                                && !IsPrinting
+                                && !IsConverting;
+
+    public bool CanStopScan => IsScanning;
+
+    public bool CanSaveScans => ScanPages.Count > 0 && !IsScanning && !IsSavingScans && !IsConverting;
+
+    public bool CanEditScans => ScanPages.Count > 0 && !IsScanning && !IsSavingScans;
+
+    public bool CanWakeScanner => !IsScanning && !IsSavingScans && !IsWakingScanner && !IsPrinting && !IsConverting;
+
+    public bool IsScannerBusy => IsScanning || IsWakingScanner;
+
+    public string FilesSummary => Files.Count == 0
+        ? "Очередь пустая"
+        : $"В очереди документов: {Files.Count}";
+
+    public string ConversionSummary
+    {
+        get
+        {
+            var documentCount = ConversionFiles.Count;
+            return documentCount == 0
+                ? "Документы не добавлены"
+                : $"Документов для PDF: {documentCount}";
+        }
+    }
+
+    private bool IsPrinting
+    {
+        get => _isPrinting;
+        set
+        {
+            if (SetProperty(ref _isPrinting, value))
+            {
+                OnPropertyChanged(nameof(CanPrint));
+                OnPropertyChanged(nameof(CanConvert));
+                OnPropertyChanged(nameof(CanStartScan));
+                OnPropertyChanged(nameof(CanWakeScanner));
+            }
+        }
+    }
+
+    private bool IsConverting
+    {
+        get => _isConverting;
+        set
+        {
+            if (SetProperty(ref _isConverting, value))
+            {
+                OnPropertyChanged(nameof(CanPrint));
+                OnPropertyChanged(nameof(CanConvert));
+                OnPropertyChanged(nameof(CanStartScan));
+                OnPropertyChanged(nameof(CanSaveScans));
+                OnPropertyChanged(nameof(CanWakeScanner));
+            }
+        }
+    }
+
+    private bool IsScanning
+    {
+        get => _isScanning;
+        set
+        {
+            if (SetProperty(ref _isScanning, value))
+            {
+                OnPropertyChanged(nameof(CanStartScan));
+                OnPropertyChanged(nameof(CanStopScan));
+                OnPropertyChanged(nameof(CanSaveScans));
+                OnPropertyChanged(nameof(CanEditScans));
+                OnPropertyChanged(nameof(CanPrint));
+                OnPropertyChanged(nameof(CanConvert));
+                OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(IsScannerBusy));
+            }
+        }
+    }
+
+    private bool IsSavingScans
+    {
+        get => _isSavingScans;
+        set
+        {
+            if (SetProperty(ref _isSavingScans, value))
+            {
+                OnPropertyChanged(nameof(CanStartScan));
+                OnPropertyChanged(nameof(CanSaveScans));
+                OnPropertyChanged(nameof(CanEditScans));
+                OnPropertyChanged(nameof(CanConvert));
+                OnPropertyChanged(nameof(CanPrint));
+                OnPropertyChanged(nameof(CanWakeScanner));
+            }
+        }
+    }
+
+    private bool IsWakingScanner
+    {
+        get => _isWakingScanner;
+        set
+        {
+            if (SetProperty(ref _isWakingScanner, value))
+            {
+                OnPropertyChanged(nameof(CanStartScan));
+                OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(IsScannerBusy));
+            }
+        }
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        UpdatePreview();
+        await RefreshScannersAsync(loadCapabilities: false);
+    }
+
+    private async void MainWorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.Source != MainWorkspaceTabs || TemplatesPanel is null || WorkspacePanel is null || PrintPreviewPanel is null)
+        {
+            return;
+        }
+
+        var scanningWorkspace = MainWorkspaceTabs.SelectedIndex == 2;
+        TemplatesPanel.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
+        PrintPreviewPanel.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
+        PrintQueueButton.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
+
+        Grid.SetColumn(WorkspacePanel, scanningWorkspace ? 0 : 1);
+        Grid.SetColumnSpan(WorkspacePanel, scanningWorkspace ? 3 : 1);
+        WorkspacePanel.Margin = scanningWorkspace ? new Thickness(0) : new Thickness(0, 0, 16, 0);
+
+        if (scanningWorkspace && IsLoaded)
+        {
+            await WakeScannerAndRefreshAsync();
+        }
+        else if (!scanningWorkspace)
+        {
+            _scannerWakeCancellation?.Cancel();
+        }
+    }
+
+    private void LoadTemplates()
+    {
+        Templates.Clear();
+        foreach (var template in TemplateStore.Load())
+        {
+            NormalizeTemplate(template);
+            Templates.Add(template);
+        }
+
+        SelectedTemplate = Templates.FirstOrDefault();
+    }
+
+    private void LoadPrinters()
+    {
+        try
+        {
+            var localServer = new LocalPrintServer();
+            foreach (var queue in localServer.GetPrintQueues())
+            {
+                PrinterNames.Add(queue.Name);
+            }
+
+            SelectedPrinterName = LocalPrintServer.GetDefaultPrintQueue()?.Name
+                                  ?? PrinterNames.FirstOrDefault()
+                                  ?? string.Empty;
+        }
+        catch
+        {
+            OverallStatus = "Принтеры пока не найдены. Вы сможете выбрать принтер в стандартном окне печати.";
+        }
+    }
+
+    private void AddFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Выберите документы для печати",
+            Multiselect = true,
+            Filter = "Поддерживаемые документы|*.txt;*.log;*.csv;*.json;*.xml;*.md;*.ini;*.cfg;*.config;*.sql;*.html;*.css;*.js;*.ts;*.cs;*.xaml;*.yaml;*.yml;*.rtf;*.docx;*.pdf|Текстовые файлы|*.txt;*.log;*.csv;*.json;*.xml;*.md;*.ini;*.cfg;*.config;*.sql;*.html;*.css;*.js;*.ts;*.cs;*.xaml;*.yaml;*.yml|Документы|*.docx;*.rtf|PDF|*.pdf|Все файлы|*.*"
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            AddFiles(dialog.FileNames);
+        }
+    }
+
+    private void AddConversionFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Выберите документы для конвертации",
+            Multiselect = true,
+            Filter = "Поддерживаемые документы|*.txt;*.log;*.csv;*.json;*.xml;*.md;*.ini;*.cfg;*.config;*.sql;*.html;*.css;*.js;*.ts;*.cs;*.xaml;*.yaml;*.yml;*.rtf;*.docx|Текстовые файлы|*.txt;*.log;*.csv;*.json;*.xml;*.md;*.ini;*.cfg;*.config;*.sql;*.html;*.css;*.js;*.ts;*.cs;*.xaml;*.yaml;*.yml|Документы|*.docx;*.rtf|Все файлы|*.*"
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            AddConversionFiles(dialog.FileNames);
+        }
+    }
+
+    private void RemoveSelectedConversionFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedFiles = ConversionFilesGrid.SelectedItems.Cast<PrintFileItem>().ToList();
+        foreach (var file in selectedFiles)
+        {
+            ConversionFiles.Remove(file);
+        }
+    }
+
+    private void ClearConversionFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (ConversionFiles.Count == 0)
+        {
+            return;
+        }
+
+        ConversionFiles.Clear();
+        ConversionProgressValue = 0;
+        ConversionStatus = "Список конвертации очищен.";
+    }
+
+    private void RemoveSelectedFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedFiles = FilesGrid.SelectedItems.Cast<PrintFileItem>().ToList();
+        foreach (var file in selectedFiles)
+        {
+            Files.Remove(file);
+        }
+
+        UpdatePreview();
+    }
+
+    private void ClearFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (Files.Count == 0)
+        {
+            return;
+        }
+
+        if (MessageBox.Show(this, "Очистить всю очередь документов?", "Очистка очереди", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        Files.Clear();
+        CurrentPrintingFile = "Очередь не запущена";
+        ProgressValue = 0;
+        OverallStatus = "Очередь очищена.";
+        UpdatePreview();
+    }
+
+    private void ApplyTemplateToSelected_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedTemplate is null)
+        {
+            return;
+        }
+
+        var selectedFiles = FilesGrid.SelectedItems.Cast<PrintFileItem>().ToList();
+        if (selectedFiles.Count == 0)
+        {
+            MessageBox.Show(this, "Выберите один или несколько документов в списке.", "Назначение шаблона", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        foreach (var file in selectedFiles)
+        {
+            file.AssignTemplate(SelectedTemplate);
+        }
+
+        OverallStatus = $"Шаблон \"{SelectedTemplate.Name}\" назначен выбранным документам.";
+        UpdatePreview();
+    }
+
+    private void NewTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        var template = new PrintTemplate
+        {
+            Name = $"Шаблон {Templates.Count + 1}"
+        };
+
+        Templates.Add(template);
+        SelectedTemplate = template;
+    }
+
+    private void DuplicateTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedTemplate is null)
+        {
+            return;
+        }
+
+        var template = SelectedTemplate.CloneAs($"{SelectedTemplate.Name} - копия");
+        Templates.Add(template);
+        SelectedTemplate = template;
+    }
+
+    private void DeleteTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedTemplate is null || Templates.Count <= 1)
+        {
+            MessageBox.Show(this, "Нужен хотя бы один шаблон печати.", "Удаление шаблона", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var templateToDelete = SelectedTemplate;
+        if (MessageBox.Show(this, $"Удалить шаблон \"{templateToDelete.Name}\"?", "Удаление шаблона", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        Templates.Remove(templateToDelete);
+        SelectedTemplate = Templates.FirstOrDefault();
+
+        if (SelectedTemplate is not null)
+        {
+            foreach (var file in Files.Where(file => file.AssignedTemplateId == templateToDelete.Id))
+            {
+                file.AssignTemplate(SelectedTemplate);
+            }
+        }
+
+        UpdatePreview();
+    }
+
+    private void SaveTemplates_Click(object sender, RoutedEventArgs e)
+    {
+        SaveTemplates(showMessage: true);
+    }
+
+    private void OpenTemplateSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedTemplate is null)
+        {
+            return;
+        }
+
+        var snapshot = SelectedTemplate.CloneAs(SelectedTemplate.Name);
+        snapshot.Id = SelectedTemplate.Id;
+        var preview = GetTemplatePreviewSource();
+        var window = new TemplateSettingsWindow(SelectedTemplate, FontFamilies, preview.Text, preview.FileName)
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() == true)
+        {
+            SaveTemplates(showMessage: false);
+            RefreshAssignedTemplateNames();
+            OverallStatus = $"Детальный шаблон \"{SelectedTemplate.Name}\" обновлен.";
+            UpdatePreview();
+            return;
+        }
+
+        SelectedTemplate.CopyFrom(snapshot);
+        RefreshAssignedTemplateNames();
+        UpdatePreview();
+    }
+
+    private async void PrintQueue_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsPrinting)
+        {
+            return;
+        }
+
+        if (Files.Count == 0)
+        {
+            MessageBox.Show(this, "Добавьте документы для печати.", "Печать", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (SelectedTemplate is null)
+        {
+            MessageBox.Show(this, "Создайте или выберите шаблон печати.", "Печать", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        SaveTemplates(showMessage: false);
+
+        PrintDialog printDialog;
+        try
+        {
+            printDialog = CreatePrintDialog(SelectedTemplate);
+        }
+        catch (Exception ex)
+        {
+            OverallStatus = $"Не удалось подготовить принтер: {ex.Message}";
+            MessageBox.Show(this, OverallStatus, "Печать", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        IsPrinting = true;
+        ProgressValue = 0;
+        var printedCount = 0;
+        var processedCount = 0;
+        var errorCount = 0;
+
+        try
+        {
+            foreach (var file in Files)
+            {
+                var template = GetTemplateForFile(file);
+                file.Status = "Печатается";
+                CurrentPrintingFile = file.FileName;
+                OverallStatus = $"Печатается {processedCount + 1} из {Files.Count}: {file.FileName}";
+                await Dispatcher.Yield(DispatcherPriority.Background);
+
+                try
+                {
+                    ApplyTemplateToPrintTicket(printDialog, template);
+                    if (IsInternalPrintFile(file))
+                    {
+                        PrintTextFile(printDialog, file, template);
+                    }
+                    else if (PdfExtensions.Contains(file.Extension))
+                    {
+                        await PrintPdfFileAsync(file.FullPath, printDialog, template);
+                    }
+                    else
+                    {
+                        throw new NotSupportedException("Этот формат пока не поддерживается встроенной печатью.");
+                    }
+
+                    file.Status = "Готово";
+                    printedCount++;
+                }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    file.Status = "Ошибка";
+                    OverallStatus = $"Не удалось напечатать {file.FileName}: {ex.Message}";
+                }
+
+                processedCount++;
+                ProgressValue = Files.Count == 0 ? 0 : processedCount * 100d / Files.Count;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+            }
+        }
+        finally
+        {
+            IsPrinting = false;
+            CurrentPrintingFile = "Очередь завершена";
+            ProgressValue = Files.Count == 0 ? 0 : 100;
+            OverallStatus = errorCount == 0
+                ? $"Готово. Отправлено в печать документов: {printedCount}."
+                : $"Готово с ошибками. Отправлено: {printedCount}, ошибок: {errorCount}.";
+        }
+    }
+
+    private void FilesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdatePreview();
+    }
+
+    private void Window_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Window_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            AddFiles(paths);
+        }
+    }
+
+    private void Conversion_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Conversion_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            AddConversionFiles(paths);
+        }
+
+        e.Handled = true;
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _scanCancellation?.Cancel();
+        _scannerWakeCancellation?.Cancel();
+        SaveTemplates(showMessage: false);
+        CleanupTemporaryPdfFiles();
+        CleanupScanPages();
+        base.OnClosing(e);
+    }
+
+    private async void RefreshScanners_Click(object sender, RoutedEventArgs e)
+    {
+        await WakeScannerAndRefreshAsync();
+    }
+
+    private async Task<bool> RefreshScannersAsync(bool loadCapabilities = true)
+    {
+        var selectedDeviceId = SelectedScanner?.DeviceId;
+        ScanStatus = "Поиск сканеров...";
+        _selectedScannerCapabilities = null;
+        OnPropertyChanged(nameof(ScannerCapabilityText));
+        OnPropertyChanged(nameof(CanStartScan));
+
+        try
+        {
+            var devices = await _scannerService.GetScannersAsync();
+            Scanners.Clear();
+            foreach (var device in devices)
+            {
+                Scanners.Add(device);
+            }
+
+            _suppressScannerCapabilityLoading = true;
+            try
+            {
+                SelectedScanner = Scanners.FirstOrDefault(device =>
+                                      string.Equals(device.DeviceId, selectedDeviceId, StringComparison.OrdinalIgnoreCase))
+                                  ?? Scanners.FirstOrDefault();
+            }
+            finally
+            {
+                _suppressScannerCapabilityLoading = false;
+            }
+
+            if (SelectedScanner is null)
+            {
+                ScanStatus = "Сканеры не найдены. Проверьте подключение и драйвер WIA.";
+                return false;
+            }
+
+            return !loadCapabilities || await LoadSelectedScannerCapabilitiesAsync();
+        }
+        catch (Exception ex)
+        {
+            Scanners.Clear();
+            _suppressScannerCapabilityLoading = true;
+            try
+            {
+                SelectedScanner = null;
+            }
+            finally
+            {
+                _suppressScannerCapabilityLoading = false;
+            }
+
+            ScanStatus = $"Не удалось получить список сканеров: {ex.Message}";
+            return false;
+        }
+    }
+
+    private async Task<bool> LoadSelectedScannerCapabilitiesAsync(
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        var version = ++_scannerCapabilitiesVersion;
+        var scanner = SelectedScanner;
+        _selectedScannerCapabilities = null;
+        OnPropertyChanged(nameof(ScannerCapabilityText));
+        OnPropertyChanged(nameof(CanStartScan));
+
+        if (scanner is null)
+        {
+            return false;
+        }
+
+        ScanStatus = $"Проверка возможностей: {scanner.Name}";
+
+        try
+        {
+            var capabilities = await _scannerService.GetCapabilitiesAsync(scanner.DeviceId)
+                .WaitAsync(timeout ?? TimeSpan.FromSeconds(20), cancellationToken);
+            if (version != _scannerCapabilitiesVersion || SelectedScanner?.DeviceId != scanner.DeviceId)
+            {
+                return false;
+            }
+
+            _selectedScannerCapabilities = capabilities;
+            AvailableScanDpi.Clear();
+            foreach (var dpi in capabilities.SupportedDpi)
+            {
+                AvailableScanDpi.Add(dpi);
+            }
+
+            if (!AvailableScanDpi.Contains(SelectedScanDpi))
+            {
+                SelectedScanDpi = AvailableScanDpi.OrderBy(value => Math.Abs(value - 300)).FirstOrDefault(300);
+            }
+
+            if (SelectedScanSource == "Feeder" && !capabilities.HasFeeder)
+            {
+                SelectedScanSource = "Flatbed";
+            }
+            else if (SelectedScanSource == "Flatbed" && !capabilities.HasFlatbed && capabilities.HasFeeder)
+            {
+                SelectedScanSource = "Feeder";
+            }
+
+            if (SelectedScanMode == "Duplex" && !capabilities.SupportsDuplex)
+            {
+                SelectedScanMode = "Simplex";
+            }
+
+            ScanStatus = "Сканер готов.";
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (version != _scannerCapabilitiesVersion)
+            {
+                return false;
+            }
+
+            ScanStatus = ex is TimeoutException
+                ? "Сканер слишком долго не отвечает. Проверьте, включено ли устройство, и нажмите обновление."
+                : $"Не удалось прочитать возможности сканера: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(ScannerCapabilityText));
+            OnPropertyChanged(nameof(CanStartScan));
+        }
+    }
+
+    private async Task WakeScannerAndRefreshAsync()
+    {
+        if (IsWakingScanner || IsScanning || IsSavingScans || IsPrinting || IsConverting)
+        {
+            return;
+        }
+
+        _scannerWakeCancellation?.Cancel();
+        _scannerWakeCancellation?.Dispose();
+        _scannerWakeCancellation = new CancellationTokenSource();
+        var cancellationToken = _scannerWakeCancellation.Token;
+        IsWakingScanner = true;
+        _selectedScannerCapabilities = null;
+        OnPropertyChanged(nameof(ScannerCapabilityText));
+        OnPropertyChanged(nameof(CanStartScan));
+
+        try
+        {
+            ScanStatus = "Пробуждение принтера и сканера...";
+            var wakeResult = await _printerWakeService.WakeAsync(SelectedPrinterName, SelectedScanner?.Name, cancellationToken);
+
+            var initialDelay = wakeResult.NetworkTargetFound
+                ? wakeResult.DeviceResponded ? TimeSpan.FromMilliseconds(700) : TimeSpan.FromSeconds(2.5)
+                : TimeSpan.FromMilliseconds(500);
+            await Task.Delay(initialDelay, cancellationToken);
+
+            var scannerFound = await RefreshScannersAsync(loadCapabilities: false);
+            if (scannerFound)
+            {
+                ScanStatus = wakeResult.ScannerAddressChanged
+                    ? "Найден новый сетевой адрес устройства. Подключение сканера может занять до двух минут..."
+                    : "Подключение к сканеру. После глубокого сна это может занять до двух минут...";
+
+                var connectionTimer = Stopwatch.StartNew();
+                var connectionTask = LoadSelectedScannerCapabilitiesAsync(TimeSpan.FromMinutes(2), cancellationToken);
+                while (!connectionTask.IsCompleted)
+                {
+                    var completedTask = await Task.WhenAny(
+                        connectionTask,
+                        Task.Delay(TimeSpan.FromSeconds(10), cancellationToken));
+                    if (completedTask == connectionTask)
+                    {
+                        break;
+                    }
+
+                    var elapsedSeconds = Math.Max(1, (int)connectionTimer.Elapsed.TotalSeconds);
+                    ScanStatus = $"Сканер запускается и устанавливает служебное соединение... {elapsedSeconds} с из 120 с.";
+                }
+
+                if (await connectionTask)
+                {
+                    ScanStatus = wakeResult.NetworkTargetFound && !string.IsNullOrWhiteSpace(wakeResult.Address)
+                        ? $"Сканер готов. Текущий сетевой адрес: {wakeResult.Address}."
+                        : "Сканер готов.";
+                    return;
+                }
+            }
+
+            ScanStatus = wakeResult.NetworkTargetFound
+                ? "Сканер не ответил за две минуты. Если устройство полностью выключено, включите его кнопкой питания."
+                : "Сканер не ответил. Для сетевого пробуждения выберите соответствующий принтер или включите устройство кнопкой питания.";
+        }
+        catch (OperationCanceledException)
+        {
+            ScanStatus = "Подключение к сканеру остановлено.";
+        }
+        catch (Exception ex)
+        {
+            ScanStatus = $"Не удалось пробудить сканер: {ex.Message}";
+        }
+        finally
+        {
+            IsWakingScanner = false;
+            _scannerWakeCancellation?.Dispose();
+            _scannerWakeCancellation = null;
+        }
+    }
+
+    private async void StartScan_Click(object sender, RoutedEventArgs e)
+    {
+        var scanner = SelectedScanner;
+        var capabilities = _selectedScannerCapabilities;
+        if (scanner is null || capabilities is null)
+        {
+            MessageBox.Show(this, "Выберите доступный сканер.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var useFeeder = SelectedScanSource == "Feeder";
+        var duplex = SelectedScanMode == "Duplex";
+
+        if (useFeeder && !capabilities.HasFeeder)
+        {
+            MessageBox.Show(this, "Выбранный сканер не поддерживает автоподатчик (ADF). Выберите планшет.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!useFeeder && !capabilities.HasFlatbed)
+        {
+            MessageBox.Show(this, "Выбранный сканер не поддерживает планшетное сканирование. Выберите автоподатчик (ADF).", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (duplex && !useFeeder)
+        {
+            MessageBox.Show(this, "Двустороннее сканирование доступно только через автоподатчик (ADF).", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (duplex && !capabilities.SupportsDuplex)
+        {
+            MessageBox.Show(this, "Этот сканер не поддерживает двустороннее сканирование. Выберите односторонний режим.", "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var tempFolder = Path.Combine(Path.GetTempPath(), "UISI Print Master", "Scans");
+        var request = new ScanRequest(
+            scanner.DeviceId,
+            useFeeder,
+            duplex,
+            SelectedScanDpi,
+            SelectedScanColorMode,
+            tempFolder);
+
+        _scanCancellation?.Dispose();
+        _scanCancellation = new CancellationTokenSource();
+        IsScanning = true;
+        ScanStatus = useFeeder ? "Сканирование пачки из автоподатчика..." : "Сканирование листа на планшете...";
+
+        var receivedPages = 0;
+        var progress = new Progress<string>(path =>
+        {
+            try
+            {
+                AddScannedPage(path);
+                receivedPages++;
+                ScanStatus = $"Получено страниц: {receivedPages}. Сканирование продолжается...";
+            }
+            catch (Exception ex)
+            {
+                DeleteFileIfExists(path);
+                ScanStatus = $"Не удалось показать страницу: {ex.Message}";
+            }
+        });
+
+        try
+        {
+            await _scannerService.ScanAsync(request, progress, _scanCancellation.Token);
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            ScanStatus = receivedPages == 0
+                ? "Сканирование завершено, но страницы не получены."
+                : $"Сканирование завершено. Добавлено страниц: {receivedPages}.";
+        }
+        catch (OperationCanceledException)
+        {
+            ScanStatus = $"Сканирование остановлено. Получено страниц: {receivedPages}.";
+        }
+        catch (Exception ex)
+        {
+            ScanStatus = $"Ошибка сканирования: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Сканирование", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            IsScanning = false;
+            _scanCancellation?.Dispose();
+            _scanCancellation = null;
+        }
+    }
+
+    private void StopScan_Click(object sender, RoutedEventArgs e)
+    {
+        ScanStatus = "Остановка после текущей страницы...";
+        _scanCancellation?.Cancel();
+    }
+
+    private void AddScannedPage(string imagePath)
+    {
+        var thumbnail = LoadScanBitmap(imagePath, 220);
+        var item = new ScanPageItem(imagePath, thumbnail)
+        {
+            IsDocumentStart = ScanPages.Count == 0 || _startNextScanAsNewDocument
+        };
+
+        _startNextScanAsNewDocument = false;
+        ScanPages.Add(item);
+        RenumberScanPages();
+        SelectedScanPage = item;
+        ScansList.ScrollIntoView(item);
+    }
+
+    private static BitmapSource LoadScanBitmap(string path, int decodePixelWidth)
+    {
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+        image.DecodePixelWidth = decodePixelWidth;
+        image.UriSource = new Uri(path, UriKind.Absolute);
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
+    private void SplitScanDocument_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedScanPage is null)
+        {
+            MessageBox.Show(this, "Выберите страницу, после которой должен начаться новый документ.", "Разделение документов", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var selectedIndex = ScanPages.IndexOf(SelectedScanPage);
+        if (selectedIndex == ScanPages.Count - 1)
+        {
+            _startNextScanAsNewDocument = true;
+            ScanStatus = "Следующая отсканированная страница начнёт новый PDF-документ.";
+            return;
+        }
+
+        ScanPages[selectedIndex + 1].IsDocumentStart = true;
+        RenumberScanPages();
+        ScanStatus = $"После страницы {selectedIndex + 1} установлен разделитель документов.";
+    }
+
+    private void JoinScanDocument_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedScanPage is null)
+        {
+            MessageBox.Show(this, "Выберите первую страницу документа, который нужно объединить с предыдущим.", "Объединение документов", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var selectedIndex = ScanPages.IndexOf(SelectedScanPage);
+        if (selectedIndex <= 0 || !SelectedScanPage.IsDocumentStart)
+        {
+            MessageBox.Show(this, "Выбранная страница не является началом отдельного документа.", "Объединение документов", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        SelectedScanPage.IsDocumentStart = false;
+        RenumberScanPages();
+        ScanStatus = "Документ объединён с предыдущим.";
+    }
+
+    private void DeleteSelectedScans_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedPages = ScansList.SelectedItems.Cast<ScanPageItem>().ToList();
+        if (selectedPages.Count == 0 && SelectedScanPage is not null)
+        {
+            selectedPages.Add(SelectedScanPage);
+        }
+
+        var selectedSet = selectedPages.ToHashSet();
+        foreach (var documentStart in selectedPages.Where(page => page.IsDocumentStart))
+        {
+            var nextIndex = ScanPages.IndexOf(documentStart) + 1;
+            while (nextIndex < ScanPages.Count && selectedSet.Contains(ScanPages[nextIndex]))
+            {
+                nextIndex++;
+            }
+
+            if (nextIndex < ScanPages.Count && !ScanPages[nextIndex].IsDocumentStart)
+            {
+                ScanPages[nextIndex].IsDocumentStart = true;
+            }
+        }
+
+        foreach (var page in selectedPages)
+        {
+            ScanPages.Remove(page);
+            DeleteFileIfExists(page.ImagePath);
+        }
+
+        _startNextScanAsNewDocument = false;
+        RenumberScanPages();
+        SelectedScanPage = ScanPages.FirstOrDefault();
+        ScanStatus = selectedPages.Count == 0 ? "Выберите страницы для удаления." : $"Удалено страниц: {selectedPages.Count}.";
+    }
+
+    private void ClearScans_Click(object sender, RoutedEventArgs e)
+    {
+        if (ScanPages.Count == 0)
+        {
+            return;
+        }
+
+        if (MessageBox.Show(this, "Удалить все отсканированные страницы из текущей сессии?", "Очистка сканов", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        CleanupScanPages();
+        ScanStatus = "Область сканов очищена.";
+    }
+
+    private async void SaveScans_Click(object sender, RoutedEventArgs e)
+    {
+        if (ScanPages.Count == 0)
+        {
+            MessageBox.Show(this, "Сначала отсканируйте хотя бы одну страницу.", "Сохранение сканов", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Выберите папку для сохранения отсканированных PDF",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var groups = BuildScanDocumentGroups();
+        var baseName = MakeSafeFileName(string.IsNullOrWhiteSpace(ScanBaseFileName) ? "Скан" : ScanBaseFileName);
+        IsSavingScans = true;
+        var savedCount = 0;
+
+        try
+        {
+            for (var index = 0; index < groups.Count; index++)
+            {
+                ScanStatus = $"Сохранение документа {index + 1} из {groups.Count}...";
+                var requestedName = groups.Count == 1
+                    ? $"{baseName}.pdf"
+                    : $"{baseName} - документ {index + 1:00}.pdf";
+                var outputPath = CreatePermanentPdfPath(requestedName, dialog.FolderName);
+
+                try
+                {
+                    await SaveScanGroupAsPdfAsync(groups[index], outputPath);
+                    savedCount++;
+                }
+                catch
+                {
+                    DeleteFileIfExists(outputPath);
+                    throw;
+                }
+            }
+
+            ScanStatus = $"Готово. Сохранено PDF-документов: {savedCount}. Папка: {dialog.FolderName}";
+        }
+        catch (Exception ex)
+        {
+            ScanStatus = $"Не удалось сохранить сканы: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Сохранение сканов", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            IsSavingScans = false;
+        }
+    }
+
+    private List<List<ScanPageItem>> BuildScanDocumentGroups()
+    {
+        var groups = new List<List<ScanPageItem>>();
+        foreach (var page in ScanPages)
+        {
+            if (groups.Count == 0 || page.IsDocumentStart)
+            {
+                groups.Add([]);
+            }
+
+            groups[^1].Add(page);
+        }
+
+        return groups;
+    }
+
+    private async Task SaveScanGroupAsPdfAsync(IReadOnlyList<ScanPageItem> pages, string outputPath)
+    {
+        var tempFolder = Path.Combine(Path.GetTempPath(), "UISI Print Master", "ScanPdf");
+        Directory.CreateDirectory(tempFolder);
+        var htmlPath = Path.Combine(tempFolder, $"scan-{Guid.NewGuid():N}.html");
+
+        try
+        {
+            await File.WriteAllTextAsync(htmlPath, BuildScanPdfHtml(pages), Encoding.UTF8);
+            await ConversionPdfBrowser.EnsureCoreWebView2Async();
+            await NavigateWebViewToUriAsync(ConversionPdfBrowser, new Uri(htmlPath).AbsoluteUri);
+            await WaitForWebImagesAsync(ConversionPdfBrowser);
+
+            var coreWebView = ConversionPdfBrowser.CoreWebView2
+                              ?? throw new InvalidOperationException("Модуль создания PDF не инициализирован.");
+            var printSettings = coreWebView.Environment.CreatePrintSettings();
+            printSettings.Orientation = CoreWebView2PrintOrientation.Portrait;
+            printSettings.ShouldPrintHeaderAndFooter = false;
+            printSettings.ShouldPrintBackgrounds = true;
+            printSettings.PagesPerSide = 1;
+            printSettings.ScaleFactor = 1;
+            printSettings.PageWidth = 8.27;
+            printSettings.PageHeight = 11.69;
+            printSettings.MarginTop = 0;
+            printSettings.MarginBottom = 0;
+            printSettings.MarginLeft = 0;
+            printSettings.MarginRight = 0;
+
+            var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
+            if (!success || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+            {
+                throw new InvalidOperationException("Не удалось создать PDF из отсканированных страниц.");
+            }
+        }
+        finally
+        {
+            DeleteFileIfExists(htmlPath);
+        }
+    }
+
+    private static string BuildScanPdfHtml(IReadOnlyList<ScanPageItem> pages)
+    {
+        var pageMarkup = string.Join(Environment.NewLine, pages.Select(page =>
+        {
+            var source = System.Net.WebUtility.HtmlEncode(new Uri(page.ImagePath).AbsoluteUri);
+            return $"<section class=\"page\"><img src=\"{source}\" alt=\"\"></section>";
+        }));
+
+        return $$"""
+                <!doctype html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <style>
+                        @page { size: A4 portrait; margin: 0; }
+                        html, body { margin: 0; padding: 0; background: white; }
+                        .page {
+                            width: 210mm;
+                            height: 297mm;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            overflow: hidden;
+                            break-after: page;
+                            page-break-after: always;
+                        }
+                        .page:last-child { break-after: auto; page-break-after: auto; }
+                        img { display: block; width: 100%; height: 100%; object-fit: contain; }
+                    </style>
+                </head>
+                <body>{{pageMarkup}}</body>
+                </html>
+                """;
+    }
+
+    private async Task NavigateWebViewToUriAsync(WebView2 browser, string uri)
+    {
+        var navigation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (e.IsSuccess)
+            {
+                navigation.TrySetResult();
+            }
+            else
+            {
+                navigation.TrySetException(new InvalidOperationException($"Не удалось подготовить сканы для PDF: {e.WebErrorStatus}."));
+            }
+        }
+
+        browser.NavigationCompleted += OnNavigationCompleted;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var _ = timeout.Token.Register(() => navigation.TrySetException(new TimeoutException("Подготовка сканов к PDF заняла слишком много времени.")));
+
+        try
+        {
+            browser.Source = new Uri(uri);
+            await navigation.Task;
+        }
+        finally
+        {
+            browser.NavigationCompleted -= OnNavigationCompleted;
+        }
+    }
+
+    private static async Task WaitForWebImagesAsync(WebView2 browser)
+    {
+        var coreWebView = browser.CoreWebView2
+                          ?? throw new InvalidOperationException("Модуль создания PDF не инициализирован.");
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var result = await coreWebView.ExecuteScriptAsync(
+                "document.readyState === 'complete' && Array.from(document.images).every(image => image.complete && image.naturalWidth > 0)");
+            if (string.Equals(result, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException("Не все страницы успели подготовиться к сохранению PDF.");
+    }
+
+    private void RenumberScanPages()
+    {
+        if (ScanPages.Count == 0)
+        {
+            OnPropertyChanged(nameof(ScanPagesSummary));
+            return;
+        }
+
+        ScanPages[0].IsDocumentStart = true;
+        var documentNumber = 0;
+        var pageInDocument = 0;
+
+        for (var index = 0; index < ScanPages.Count; index++)
+        {
+            var page = ScanPages[index];
+            if (page.IsDocumentStart)
+            {
+                documentNumber++;
+                pageInDocument = 0;
+            }
+
+            pageInDocument++;
+            page.PageNumber = index + 1;
+            page.DocumentNumber = documentNumber;
+            page.PageInDocument = pageInDocument;
+        }
+
+        OnPropertyChanged(nameof(ScanPagesSummary));
+    }
+
+    private int GetScanDocumentCount()
+    {
+        return ScanPages.Count == 0 ? 0 : Math.Max(1, ScanPages.Count(page => page.IsDocumentStart));
+    }
+
+    private void CleanupScanPages()
+    {
+        foreach (var page in ScanPages.ToList())
+        {
+            DeleteFileIfExists(page.ImagePath);
+        }
+
+        ScanPages.Clear();
+        SelectedScanPage = null;
+        _startNextScanAsNewDocument = false;
+    }
+
+    private void AddFiles(IEnumerable<string> paths)
+    {
+        if (SelectedTemplate is null)
+        {
+            return;
+        }
+
+        var existingPaths = Files.Select(file => file.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var addedCount = 0;
+        var skippedCount = 0;
+
+        foreach (var path in ExpandDroppedPaths(paths))
+        {
+            if (!File.Exists(path) || existingPaths.Contains(path) || !IsSupportedFile(path))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            try
+            {
+                var item = new PrintFileItem(path);
+                item.AssignTemplate(SelectedTemplate);
+                Files.Add(item);
+                existingPaths.Add(path);
+                addedCount++;
+            }
+            catch
+            {
+                skippedCount++;
+            }
+        }
+
+        OverallStatus = addedCount > 0
+            ? $"Добавлено документов: {addedCount}."
+            : "Подходящие новые документы не найдены.";
+
+        if (skippedCount > 0 && addedCount > 0)
+        {
+            OverallStatus += $" Пропущено: {skippedCount}.";
+        }
+
+        UpdatePreview();
+    }
+
+    private void AddConversionFiles(IEnumerable<string> paths)
+    {
+        var existingPaths = ConversionFiles.Select(file => file.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var addedCount = 0;
+        var skippedCount = 0;
+
+        foreach (var path in ExpandDroppedPaths(paths))
+        {
+            if (!File.Exists(path) || existingPaths.Contains(path) || !IsConvertibleToPdfFile(path))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            try
+            {
+                var item = new PrintFileItem(path);
+                item.Status = "Ожидает конвертации";
+                ConversionFiles.Add(item);
+                existingPaths.Add(path);
+                addedCount++;
+            }
+            catch
+            {
+                skippedCount++;
+            }
+        }
+
+        ConversionStatus = addedCount > 0
+            ? $"Добавлено в конвертацию: {addedCount}."
+            : "Подходящие документы не найдены.";
+
+        if (skippedCount > 0 && addedCount > 0)
+        {
+            ConversionStatus += $" Пропущено: {skippedCount}.";
+        }
+    }
+
+    private static IEnumerable<string> ExpandDroppedPaths(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            if (File.Exists(path))
+            {
+                yield return path;
+                continue;
+            }
+
+            if (!Directory.Exists(path))
+            {
+                continue;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(path).Where(IsSupportedFile))
+            {
+                yield return file;
+            }
+        }
+    }
+
+    private static bool IsSupportedFile(string path)
+    {
+        return SupportedExtensions.Contains(Path.GetExtension(path));
+    }
+
+    private static bool IsInternalPrintFile(PrintFileItem file)
+    {
+        return TextExtensions.Contains(file.Extension) || DocumentExtensions.Contains(file.Extension);
+    }
+
+    private static bool IsDocumentFile(PrintFileItem file)
+    {
+        return DocumentExtensions.Contains(file.Extension);
+    }
+
+    private static bool IsConvertibleToPdfFile(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return TextExtensions.Contains(extension) || DocumentExtensions.Contains(extension);
+    }
+
+    private PrintTemplate GetTemplateForFile(PrintFileItem file)
+    {
+        if (UseOneTemplateForAll)
+        {
+            return SelectedTemplate!;
+        }
+
+        return Templates.FirstOrDefault(template => template.Id == file.AssignedTemplateId)
+               ?? SelectedTemplate!;
+    }
+
+    private PrintDialog CreatePrintDialog(PrintTemplate template)
+    {
+        var dialog = new PrintDialog();
+
+        try
+        {
+            var server = new LocalPrintServer();
+            dialog.PrintQueue = !string.IsNullOrWhiteSpace(SelectedPrinterName)
+                ? server.GetPrintQueue(SelectedPrinterName)
+                : LocalPrintServer.GetDefaultPrintQueue();
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrWhiteSpace(SelectedPrinterName))
+            {
+                throw new InvalidOperationException($"принтер \"{SelectedPrinterName}\" недоступен или удален.", ex);
+            }
+
+            throw new InvalidOperationException("принтер по умолчанию недоступен.", ex);
+        }
+
+        ApplyTemplateToPrintTicket(dialog, template);
+        return dialog;
+    }
+
+    private static void ApplyTemplateToPrintTicket(PrintDialog dialog, PrintTemplate template)
+    {
+        dialog.PrintTicket ??= new PrintTicket();
+        ApplyTemplateToPrintTicket(dialog.PrintTicket, template);
+    }
+
+    private static void ApplyTemplateToPrintTicket(PrintTicket printTicket, PrintTemplate template)
+    {
+        printTicket.PageOrientation = template.PageOrientation == "Landscape"
+            ? PageOrientation.Landscape
+            : PageOrientation.Portrait;
+        printTicket.Duplexing = template.DuplexMode switch
+        {
+            "TwoSidedLongEdge" => Duplexing.TwoSidedLongEdge,
+            _ => Duplexing.OneSided
+        };
+        printTicket.CopyCount = Math.Clamp(template.Copies, 1, 99);
+    }
+
+    private static void PrintTextFile(PrintDialog dialog, PrintFileItem file, PrintTemplate template)
+    {
+        var document = BuildTextDocument(
+            file.FileName,
+            ReadPrintableDocumentText(file),
+            template,
+            Math.Max(dialog.PrintableAreaWidth, 100),
+            Math.Max(dialog.PrintableAreaHeight, 100));
+
+        dialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, file.FileName);
+    }
+
+    private async Task PrintPdfFileAsync(string pdfPath, PrintDialog dialog, PrintTemplate template)
+    {
+        if (!File.Exists(pdfPath))
+        {
+            throw new FileNotFoundException("PDF-файл для печати не найден.", pdfPath);
+        }
+
+        await PrintPdfWithWebViewAsync(pdfPath, dialog, template);
+    }
+
+    private async Task PrintPdfWithWebViewAsync(string pdfPath, PrintDialog dialog, PrintTemplate template)
+    {
+        StopPreviewDrag();
+        StopPdfPreviewDrag();
+        FlowPreviewHost.Visibility = Visibility.Collapsed;
+        PreviewMessageHost.Visibility = Visibility.Collapsed;
+        PdfPreviewHost.Visibility = Visibility.Visible;
+
+        await PdfPreviewBrowser.EnsureCoreWebView2Async();
+        await NavigateWebViewToFileAsync(PdfPreviewBrowser, pdfPath);
+        await WaitForPdfRenderAsync();
+
+        var coreWebView = PdfPreviewBrowser.CoreWebView2
+                          ?? throw new InvalidOperationException("PDF-принтер WebView2 не инициализирован.");
+        var printSettings = coreWebView.Environment.CreatePrintSettings();
+        ApplyTemplateToWebViewPrintSettings(printSettings, dialog, template);
+
+        var printStatus = await coreWebView.PrintAsync(printSettings);
+        if (printStatus != CoreWebView2PrintStatus.Succeeded)
+        {
+            throw new InvalidOperationException($"PDF-печать не выполнена: {GetPdfPrintStatusMessage(printStatus)}.");
+        }
+    }
+
+    private async Task NavigateWebViewToFileAsync(WebView2 browser, string path)
+    {
+        var coreWebView = browser.CoreWebView2
+                          ?? throw new InvalidOperationException("WebView2 не инициализирован.");
+        var navigation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (e.IsSuccess)
+            {
+                navigation.TrySetResult();
+                return;
+            }
+
+            navigation.TrySetException(new InvalidOperationException($"Не удалось открыть PDF для печати: {e.WebErrorStatus}."));
+        }
+
+        browser.NavigationCompleted += OnNavigationCompleted;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var _ = timeout.Token.Register(() => navigation.TrySetException(new TimeoutException("PDF слишком долго открывался перед печатью.")));
+
+        try
+        {
+            coreWebView.Navigate(new Uri(path).AbsoluteUri);
+            await navigation.Task;
+        }
+        finally
+        {
+            browser.NavigationCompleted -= OnNavigationCompleted;
+        }
+    }
+
+    private async Task WaitForPdfRenderAsync()
+    {
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        await Task.Delay(1800);
+    }
+
+    private void ApplyTemplateToWebViewPrintSettings(CoreWebView2PrintSettings printSettings, PrintDialog dialog, PrintTemplate template)
+    {
+        printSettings.PrinterName = dialog.PrintQueue?.FullName
+                                    ?? dialog.PrintQueue?.Name
+                                    ?? SelectedPrinterName;
+        printSettings.Copies = Math.Clamp(template.Copies, 1, 99);
+        printSettings.Duplex = template.DuplexMode == "TwoSidedLongEdge"
+            ? CoreWebView2PrintDuplex.TwoSidedLongEdge
+            : CoreWebView2PrintDuplex.OneSided;
+        printSettings.Orientation = template.PageOrientation == "Landscape"
+            ? CoreWebView2PrintOrientation.Landscape
+            : CoreWebView2PrintOrientation.Portrait;
+        printSettings.Collation = CoreWebView2PrintCollation.Collated;
+        printSettings.ShouldPrintHeaderAndFooter = false;
+        printSettings.ShouldPrintBackgrounds = true;
+        printSettings.PagesPerSide = 1;
+        printSettings.ScaleFactor = 1;
+        printSettings.MarginTop = 0;
+        printSettings.MarginBottom = 0;
+        printSettings.MarginLeft = 0;
+        printSettings.MarginRight = 0;
+    }
+
+    private static string GetPdfPrintStatusMessage(CoreWebView2PrintStatus status)
+    {
+        return status switch
+        {
+            CoreWebView2PrintStatus.PrinterUnavailable => "принтер недоступен",
+            CoreWebView2PrintStatus.OtherError => "ошибка WebView2 при отправке PDF на печать",
+            _ => status.ToString()
+        };
+    }
+
+    private async void UpdatePreview()
+    {
+        if (!IsLoaded || SelectedTemplate is null)
+        {
+            return;
+        }
+
+        var previewVersion = ++_previewVersion;
+        var selectedFile = FilesGrid.SelectedItem as PrintFileItem;
+        var template = selectedFile is null ? SelectedTemplate : GetTemplateForFile(selectedFile);
+
+        HidePreviewSurfaces();
+
+        if (selectedFile is null)
+        {
+            ShowFlowPreview(BuildTextDocument("Пример документа.txt", CreateDefaultPreviewText(), template, GetPreviewPageWidth(template), GetPreviewPageHeight(template)));
+            return;
+        }
+
+        try
+        {
+            if (PdfExtensions.Contains(selectedFile.Extension))
+            {
+                ClearPreviewPdf();
+                await ShowPdfPreviewAsync(selectedFile.FullPath, previewVersion);
+                return;
+            }
+
+            var document = BuildTextDocument(selectedFile.FileName, ReadPrintableDocumentText(selectedFile), template, GetPreviewPageWidth(template), GetPreviewPageHeight(template));
+
+            ShowFlowPreview(document);
+        }
+        catch (Exception ex)
+        {
+            ShowPreviewMessage($"Не удалось построить предпросмотр: {ex.Message}");
+        }
+    }
+
+    private async Task ShowPdfPreviewAsync(string pdfPath, int previewVersion)
+    {
+        FlowPreviewHost.Visibility = Visibility.Collapsed;
+        PreviewMessageHost.Visibility = Visibility.Collapsed;
+        PdfPreviewHost.Visibility = Visibility.Visible;
+
+        try
+        {
+            await PdfPreviewBrowser.EnsureCoreWebView2Async();
+            if (previewVersion != _previewVersion)
+            {
+                return;
+            }
+
+            PdfPreviewBrowser.Source = new Uri(pdfPath);
+        }
+        catch (Exception ex)
+        {
+            ShowPreviewMessage($"PDF-предпросмотр недоступен: {ex.Message}");
+        }
+    }
+
+    private void ShowFlowPreview(FlowDocument document)
+    {
+        ClearPreviewPdf();
+        PdfPreviewHost.Visibility = Visibility.Collapsed;
+        PreviewMessageHost.Visibility = Visibility.Collapsed;
+        FlowPreviewHost.Visibility = Visibility.Visible;
+        PrintPreviewViewer.Visibility = Visibility.Visible;
+        PrintPreviewViewer.Document = document;
+        _previewScrollViewer = null;
+    }
+
+    private void ShowPreviewMessage(string message)
+    {
+        ClearPreviewPdf();
+        PdfPreviewHost.Visibility = Visibility.Collapsed;
+        FlowPreviewHost.Visibility = Visibility.Collapsed;
+        PreviewMessageHost.Visibility = Visibility.Visible;
+        PreviewMessage.Text = message;
+    }
+
+    private void HidePreviewSurfaces()
+    {
+        PdfPreviewHost.Visibility = Visibility.Collapsed;
+        PreviewMessageHost.Visibility = Visibility.Collapsed;
+        FlowPreviewHost.Visibility = Visibility.Collapsed;
+        StopPreviewDrag();
+        StopPdfPreviewDrag();
+    }
+
+    private async void ConvertSelectedFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedFiles = ConversionFilesGrid.SelectedItems
+            .Cast<PrintFileItem>()
+            .ToList();
+
+        if (selectedFiles.Count == 0)
+        {
+            MessageBox.Show(this, "Выберите один или несколько файлов в списке конвертации.", "Конвертация", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var outputFolder = PromptForConversionFolder();
+        if (outputFolder is null)
+        {
+            return;
+        }
+
+        await ConvertFilesToPdfAsync(selectedFiles, outputFolder);
+    }
+
+    private async void ConvertAllWordFiles_Click(object sender, RoutedEventArgs e)
+    {
+        var filesToConvert = ConversionFiles.ToList();
+        if (filesToConvert.Count == 0)
+        {
+            MessageBox.Show(this, "Добавьте документы в список конвертации.", "Конвертация", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var outputFolder = PromptForConversionFolder();
+        if (outputFolder is null)
+        {
+            return;
+        }
+
+        await ConvertFilesToPdfAsync(filesToConvert, outputFolder);
+    }
+
+    private string? PromptForConversionFolder()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Выберите папку для сохранения PDF",
+            Multiselect = false
+        };
+
+        return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
+    }
+
+    private async Task ConvertFilesToPdfAsync(IReadOnlyList<PrintFileItem> filesToConvert, string outputFolder)
+    {
+        if (IsConverting || filesToConvert.Count == 0)
+        {
+            return;
+        }
+
+        IsConverting = true;
+        ConversionProgressValue = 0;
+        var completedCount = 0;
+        var convertedCount = 0;
+        var errorCount = 0;
+
+        try
+        {
+            foreach (var file in filesToConvert)
+            {
+                file.Status = "Конвертация";
+                ConversionStatus = $"Конвертация {completedCount + 1} из {filesToConvert.Count}: {file.FileName}";
+                await Dispatcher.Yield(DispatcherPriority.Background);
+
+                try
+                {
+                    var outputPath = CreatePermanentPdfPath(file.FileName, outputFolder);
+                    try
+                    {
+                        await ConvertPrintableFileToPdfAsync(file, outputPath, SelectedTemplate ?? Templates.FirstOrDefault() ?? new PrintTemplate());
+                    }
+                    catch
+                    {
+                        DeleteFileIfExists(outputPath);
+                        throw;
+                    }
+
+                    file.Status = "PDF готов";
+                    convertedCount++;
+                }
+                catch (Exception ex)
+                {
+                    file.Status = "Ошибка";
+                    errorCount++;
+                    ConversionStatus = $"Не удалось конвертировать {file.FileName}: {ex.Message}";
+                }
+
+                completedCount++;
+                ConversionProgressValue = completedCount * 100d / filesToConvert.Count;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+            }
+        }
+        finally
+        {
+            IsConverting = false;
+            ConversionProgressValue = filesToConvert.Count == 0 ? 0 : 100;
+            ConversionStatus = errorCount == 0
+                ? $"Готово. Создано PDF: {convertedCount}. Папка: {outputFolder}"
+                : $"Готово с ошибками. Создано PDF: {convertedCount}, ошибок: {errorCount}. Папка: {outputFolder}";
+        }
+    }
+
+    private async Task ConvertPrintableFileToPdfAsync(PrintFileItem file, string outputPath, PrintTemplate template)
+    {
+        var html = BuildPdfConversionHtml(file.FileName, ReadPrintableDocumentText(file), template);
+
+        await ConversionPdfBrowser.EnsureCoreWebView2Async();
+        await NavigateWebViewToHtmlAsync(ConversionPdfBrowser, html);
+
+        var coreWebView = ConversionPdfBrowser.CoreWebView2
+                          ?? throw new InvalidOperationException("PDF-конвертер WebView2 не инициализирован.");
+        var printSettings = coreWebView.Environment.CreatePrintSettings();
+        ApplyTemplateToPdfFileSettings(printSettings, template);
+
+        var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
+        if (!success || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+        {
+            throw new InvalidOperationException("Не удалось создать PDF-файл.");
+        }
+    }
+
+    private async Task NavigateWebViewToHtmlAsync(WebView2 browser, string html)
+    {
+        var navigation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (e.IsSuccess)
+            {
+                navigation.TrySetResult();
+                return;
+            }
+
+            navigation.TrySetException(new InvalidOperationException($"Не удалось подготовить документ для PDF: {e.WebErrorStatus}."));
+        }
+
+        browser.NavigationCompleted += OnNavigationCompleted;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var _ = timeout.Token.Register(() => navigation.TrySetException(new TimeoutException("Документ слишком долго готовился к PDF-конвертации.")));
+
+        try
+        {
+            browser.NavigateToString(html);
+            await navigation.Task;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        }
+        finally
+        {
+            browser.NavigationCompleted -= OnNavigationCompleted;
+        }
+    }
+
+    private static string BuildPdfConversionHtml(string fileName, string text, PrintTemplate template)
+    {
+        var title = System.Net.WebUtility.HtmlEncode(fileName);
+        var body = System.Net.WebUtility.HtmlEncode(text);
+        var fontFamily = EscapeCssString(string.IsNullOrWhiteSpace(template.FontFamily) ? "Segoe UI" : template.FontFamily);
+        var fontSize = Math.Clamp(template.FontSize, 8, 72).ToString(CultureInfo.InvariantCulture);
+        var lineHeight = Math.Clamp(template.LineSpacing, 1, 3).ToString(CultureInfo.InvariantCulture);
+        var whiteSpace = template.WordWrap ? "pre-wrap" : "pre";
+        var wrap = template.WordWrap ? "overflow-wrap: anywhere;" : "overflow-wrap: normal;";
+        var header = template.IncludeFileNameHeader ? $"<div class=\"header\">{title}</div>" : string.Empty;
+        var footer = template.IncludePrintedAtFooter
+            ? $"<div class=\"footer\">Напечатано: {DateTime.Now:dd.MM.yyyy HH:mm}</div>"
+            : string.Empty;
+
+        return $$"""
+                <!doctype html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <style>
+                        @page { size: A4 {{(template.PageOrientation == "Landscape" ? "landscape" : "portrait")}}; margin: 0; }
+                        body {
+                            margin: 0;
+                            color: #111827;
+                            font-family: "{{fontFamily}}", "Segoe UI", Arial, sans-serif;
+                            font-size: {{fontSize}}pt;
+                            line-height: {{lineHeight}};
+                            white-space: {{whiteSpace}};
+                            {{wrap}}
+                        }
+                        .header {
+                            color: #6b7280;
+                            font-size: 10pt;
+                            font-weight: 600;
+                            border-bottom: 1px solid #d1d5db;
+                            margin-bottom: 12pt;
+                            padding-bottom: 6pt;
+                        }
+                        .footer {
+                            color: #6b7280;
+                            font-size: 9pt;
+                            margin-top: 14pt;
+                        }
+                    </style>
+                </head>
+                <body>{{header}}<div>{{body}}</div>{{footer}}</body>
+                </html>
+                """;
+    }
+
+    private static string EscapeCssString(string value)
+    {
+        return value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+    }
+
+    private static void ApplyTemplateToPdfFileSettings(CoreWebView2PrintSettings printSettings, PrintTemplate template)
+    {
+        printSettings.Orientation = template.PageOrientation == "Landscape"
+            ? CoreWebView2PrintOrientation.Landscape
+            : CoreWebView2PrintOrientation.Portrait;
+        printSettings.ShouldPrintHeaderAndFooter = false;
+        printSettings.ShouldPrintBackgrounds = true;
+        printSettings.PagesPerSide = 1;
+        printSettings.ScaleFactor = 1;
+        printSettings.PageWidth = template.PageOrientation == "Landscape" ? 11.69 : 8.27;
+        printSettings.PageHeight = template.PageOrientation == "Landscape" ? 8.27 : 11.69;
+        printSettings.MarginTop = MmToInches(template.MarginTop);
+        printSettings.MarginBottom = MmToInches(template.MarginBottom);
+        printSettings.MarginLeft = MmToInches(template.MarginLeft);
+        printSettings.MarginRight = MmToInches(template.MarginRight);
+    }
+
+    private string CreateTemporaryPdfPath(PrintFileItem file, string scope)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "UISI Print Master", scope);
+        Directory.CreateDirectory(folder);
+
+        var fileName = MakeSafeFileName(Path.GetFileNameWithoutExtension(file.FileName));
+        var path = Path.Combine(folder, $"{fileName}-{Guid.NewGuid():N}.pdf");
+        _temporaryPdfFiles.Add(path);
+        return path;
+    }
+
+    private static string CreatePermanentPdfPath(string sourceFileName, string outputFolder)
+    {
+        Directory.CreateDirectory(outputFolder);
+
+        var fileName = MakeSafeFileName(Path.GetFileNameWithoutExtension(sourceFileName));
+        var candidate = Path.Combine(outputFolder, $"{fileName}.pdf");
+
+        if (!File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        for (var index = 2; index < 1000; index++)
+        {
+            candidate = Path.Combine(outputFolder, $"{fileName} ({index}).pdf");
+            if (!File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return Path.Combine(outputFolder, $"{fileName}-{Guid.NewGuid():N}.pdf");
+    }
+
+    private static void DeleteFileIfExists(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup for partial conversion output.
+        }
+    }
+
+    private void ClearPreviewPdf()
+    {
+        if (_currentPreviewPdfPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            PdfPreviewBrowser.CoreWebView2?.Navigate("about:blank");
+            PdfPreviewBrowser.Source = null;
+        }
+        catch
+        {
+            // WebView2 may not be initialized yet.
+        }
+
+        DeleteTemporaryPdf(_currentPreviewPdfPath);
+        _currentPreviewPdfPath = null;
+    }
+
+    private void DeleteTemporaryPdf(string path)
+    {
+        _temporaryPdfFiles.Remove(path);
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // WebView2 or a PDF handler can keep the file for a short time; cleanup retries on exit.
+            _temporaryPdfFiles.Add(path);
+        }
+    }
+
+    private void ScheduleTemporaryPdfCleanup(string path)
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMinutes(5));
+            try
+            {
+                await Dispatcher.InvokeAsync(() => DeleteTemporaryPdf(path));
+            }
+            catch
+            {
+                // The application may already be shutting down.
+            }
+        });
+    }
+
+    private void CleanupTemporaryPdfFiles()
+    {
+        ClearPreviewPdf();
+
+        foreach (var path in _temporaryPdfFiles.ToList())
+        {
+            DeleteTemporaryPdf(path);
+        }
+    }
+
+    private static string MakeSafeFileName(string fileName)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var safeChars = fileName.Select(character => invalidChars.Contains(character) ? '_' : character).ToArray();
+        var safeName = new string(safeChars).Trim();
+        return string.IsNullOrWhiteSpace(safeName) ? "document" : safeName;
+    }
+
+    private void PreviewDrag_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _previewScrollViewer ??= FindVisualChild<ScrollViewer>(PrintPreviewViewer);
+        if (_previewScrollViewer is null)
+        {
+            return;
+        }
+
+        if (IsFromScrollControl(e.OriginalSource, FlowPreviewHost))
+        {
+            return;
+        }
+
+        _isPreviewDragging = true;
+        _previewDragStart = e.GetPosition(FlowPreviewHost);
+        _previewDragStartHorizontalOffset = _previewScrollViewer.HorizontalOffset;
+        _previewDragStartVerticalOffset = _previewScrollViewer.VerticalOffset;
+        FlowPreviewHost.Cursor = Cursors.SizeAll;
+        FlowPreviewHost.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void PreviewDrag_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isPreviewDragging || _previewScrollViewer is null)
+        {
+            return;
+        }
+
+        var currentPosition = e.GetPosition(FlowPreviewHost);
+        var delta = currentPosition - _previewDragStart;
+        _previewScrollViewer.ScrollToHorizontalOffset(_previewDragStartHorizontalOffset - delta.X);
+        _previewScrollViewer.ScrollToVerticalOffset(_previewDragStartVerticalOffset - delta.Y);
+        e.Handled = true;
+    }
+
+    private void PreviewDrag_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        StopPreviewDrag();
+        e.Handled = true;
+    }
+
+    private void PreviewDrag_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            StopPreviewDrag();
+        }
+    }
+
+    private void StopPreviewDrag()
+    {
+        if (!_isPreviewDragging)
+        {
+            return;
+        }
+
+        _isPreviewDragging = false;
+        FlowPreviewHost.Cursor = Cursors.Hand;
+        if (FlowPreviewHost.IsMouseCaptured)
+        {
+            FlowPreviewHost.ReleaseMouseCapture();
+        }
+    }
+
+    private void PdfPreviewDrag_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (PdfPreviewBrowser.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        _isPdfPreviewDragging = true;
+        _pdfPreviewDragStart = e.GetPosition(PdfPreviewHost);
+        PdfPreviewHost.Cursor = Cursors.SizeAll;
+        PdfPreviewBrowser.Cursor = Cursors.SizeAll;
+        PdfPreviewHost.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void PdfPreviewDrag_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isPdfPreviewDragging || PdfPreviewBrowser.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var currentPosition = e.GetPosition(PdfPreviewHost);
+        var delta = currentPosition - _pdfPreviewDragStart;
+        _pdfPreviewDragStart = currentPosition;
+
+        if (Math.Abs(delta.X) < 0.5 && Math.Abs(delta.Y) < 0.5)
+        {
+            return;
+        }
+
+        var scrollX = (-delta.X).ToString("0.###", CultureInfo.InvariantCulture);
+        var scrollY = (-delta.Y).ToString("0.###", CultureInfo.InvariantCulture);
+        _ = PdfPreviewBrowser.CoreWebView2.ExecuteScriptAsync($"window.scrollBy({scrollX}, {scrollY});");
+        e.Handled = true;
+    }
+
+    private void PdfPreviewDrag_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        StopPdfPreviewDrag();
+        e.Handled = true;
+    }
+
+    private void PdfPreviewDrag_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            StopPdfPreviewDrag();
+        }
+    }
+
+    private void StopPdfPreviewDrag()
+    {
+        if (!_isPdfPreviewDragging)
+        {
+            return;
+        }
+
+        _isPdfPreviewDragging = false;
+        PdfPreviewHost.Cursor = Cursors.Hand;
+        PdfPreviewBrowser.Cursor = Cursors.Hand;
+        if (PdfPreviewHost.IsMouseCaptured)
+        {
+            PdfPreviewHost.ReleaseMouseCapture();
+        }
+    }
+
+    private static bool IsFromScrollControl(object originalSource, DependencyObject previewRoot)
+    {
+        if (originalSource is not DependencyObject current)
+        {
+            return false;
+        }
+
+        while (current != previewRoot)
+        {
+            if (current is ScrollBar or Thumb or RepeatButton)
+            {
+                return true;
+            }
+
+            var parent = GetSafeParent(current);
+            if (parent is null)
+            {
+                return false;
+            }
+
+            current = parent;
+        }
+
+        return false;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        if (parent is not Visual and not System.Windows.Media.Media3D.Visual3D)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typedChild)
+            {
+                return typedChild;
+            }
+
+            var nestedChild = FindVisualChild<T>(child);
+            if (nestedChild is not null)
+            {
+                return nestedChild;
+            }
+        }
+
+        return null;
+    }
+
+    private static DependencyObject? GetSafeParent(DependencyObject current)
+    {
+        if (current is Visual or System.Windows.Media.Media3D.Visual3D)
+        {
+            var visualParent = VisualTreeHelper.GetParent(current);
+            if (visualParent is not null)
+            {
+                return visualParent;
+            }
+        }
+
+        return LogicalTreeHelper.GetParent(current);
+    }
+
+    private static void NormalizeTemplate(PrintTemplate template)
+    {
+        if (template.DuplexMode is not ("OneSided" or "TwoSidedLongEdge"))
+        {
+            template.DuplexMode = "OneSided";
+        }
+    }
+
+    private static FlowDocument BuildTextDocument(string fileName, string text, PrintTemplate template, double pageWidth, double pageHeight)
+    {
+        var document = CreateDocumentShell(template, pageWidth, pageHeight);
+        AddHeader(document, fileName, template);
+
+        document.Blocks.Add(new Paragraph(new Run(text))
+        {
+            Margin = new Thickness(0),
+            LineHeight = template.FontSize * Math.Clamp(template.LineSpacing, 1, 3)
+        });
+
+        AddFooter(document, template);
+        return document;
+    }
+
+    private static FlowDocument CreateDocumentShell(PrintTemplate template, double pageWidth, double pageHeight)
+    {
+        if (template.PageOrientation == "Landscape" && pageHeight > pageWidth)
+        {
+            (pageWidth, pageHeight) = (pageHeight, pageWidth);
+        }
+        else if (template.PageOrientation != "Landscape" && pageWidth > pageHeight)
+        {
+            (pageWidth, pageHeight) = (pageHeight, pageWidth);
+        }
+
+        var fontSize = Math.Clamp(template.FontSize, 8, 72);
+        return new FlowDocument
+        {
+            PageWidth = pageWidth,
+            MinPageWidth = pageWidth,
+            MaxPageWidth = pageWidth,
+            PageHeight = pageHeight,
+            PagePadding = new Thickness(
+                MmToDiu(template.MarginLeft),
+                MmToDiu(template.MarginTop),
+                MmToDiu(template.MarginRight),
+                MmToDiu(template.MarginBottom)),
+            ColumnWidth = template.WordWrap ? double.PositiveInfinity : 100000,
+            FontFamily = new FontFamily(string.IsNullOrWhiteSpace(template.FontFamily) ? "Segoe UI" : template.FontFamily),
+            FontSize = fontSize,
+            TextAlignment = TextAlignment.Left,
+            Background = Brushes.White
+        };
+    }
+
+    private static void AddHeader(FlowDocument document, string fileName, PrintTemplate template)
+    {
+        if (!template.IncludeFileNameHeader)
+        {
+            return;
+        }
+
+        var header = new Paragraph(new Run(fileName))
+        {
+            FontSize = Math.Clamp(template.FontSize, 8, 72) + 2,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 10)
+        };
+
+        if (document.Blocks.FirstBlock is null)
+        {
+            document.Blocks.Add(header);
+        }
+        else
+        {
+            document.Blocks.InsertBefore(document.Blocks.FirstBlock, header);
+        }
+    }
+
+    private static void AddFooter(FlowDocument document, PrintTemplate template)
+    {
+        if (!template.IncludePrintedAtFooter)
+        {
+            return;
+        }
+
+        document.Blocks.Add(new Paragraph(new Run($"Напечатано: {DateTime.Now:dd.MM.yyyy HH:mm}"))
+        {
+            Foreground = Brushes.Gray,
+            FontSize = Math.Max(Math.Clamp(template.FontSize, 8, 72) - 1, 8),
+            Margin = new Thickness(0, 14, 0, 0)
+        });
+    }
+
+    private static double GetPreviewPageWidth(PrintTemplate template)
+    {
+        return template.PageOrientation == "Landscape" ? 980d : 700d;
+    }
+
+    private static double GetPreviewPageHeight(PrintTemplate template)
+    {
+        return template.PageOrientation == "Landscape" ? 700d : 980d;
+    }
+
+    private static string ReadPrintableDocumentText(PrintFileItem file)
+    {
+        if (DocumentExtensions.Contains(file.Extension))
+        {
+            return DocumentTextReader.ReadText(file.FullPath, file.Extension);
+        }
+
+        if (TextExtensions.Contains(file.Extension))
+        {
+            return ReadTextFile(file.FullPath);
+        }
+
+        throw new NotSupportedException("Этот формат пока не поддерживается встроенной обработкой.");
+    }
+
+    private static string ReadTextFile(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        {
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        }
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+        {
+            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+        {
+            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        try
+        {
+            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            return DecodeWindows1251(bytes);
+        }
+    }
+
+    private static string DecodeWindows1251(byte[] bytes)
+    {
+        var chars = new char[bytes.Length];
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            var value = bytes[i];
+            chars[i] = value < 128 ? (char)value : Windows1251Chars[value - 128];
+        }
+
+        return new string(chars);
+    }
+
+    private static double MmToDiu(double millimeters)
+    {
+        if (!double.IsFinite(millimeters))
+        {
+            millimeters = 15;
+        }
+
+        return Math.Clamp(millimeters, 0, 100) / 25.4 * 96;
+    }
+
+    private static double MmToInches(double millimeters)
+    {
+        if (!double.IsFinite(millimeters))
+        {
+            millimeters = 15;
+        }
+
+        return Math.Clamp(millimeters, 0, 100) / 25.4;
+    }
+
+    private (string FileName, string Text) GetTemplatePreviewSource()
+    {
+        var selectedFile = FilesGrid.SelectedItem as PrintFileItem ?? Files.FirstOrDefault();
+        if (selectedFile is not null)
+        {
+            if (IsInternalPrintFile(selectedFile))
+            {
+                try
+                {
+                    return (selectedFile.FileName, ReadPrintableDocumentText(selectedFile));
+                }
+                catch
+                {
+                    return (selectedFile.FileName, CreateDefaultPreviewText());
+                }
+            }
+
+            return (selectedFile.FileName, CreateDefaultPreviewText());
+        }
+
+        return ("Пример документа.txt", CreateDefaultPreviewText());
+    }
+
+    private static string CreateDefaultPreviewText()
+    {
+        return "UISI Print Master" + Environment.NewLine +
+               Environment.NewLine +
+               "Это пример документа для предпросмотра печати. Он помогает увидеть базовые параметры листа, поля, шрифт, межстрочный интервал и перенос длинных строк." + Environment.NewLine +
+               Environment.NewLine +
+               "Добавьте файл в очередь или выберите существующий документ, чтобы предпросмотр строился на реальном содержимом.";
+    }
+
+    private void SaveTemplates(bool showMessage)
+    {
+        try
+        {
+            TemplateStore.Save(Templates);
+            RefreshAssignedTemplateNames();
+
+            if (showMessage)
+            {
+                MessageBox.Show(this, "Шаблоны сохранены.", "Шаблоны печати", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Не удалось сохранить шаблоны: {ex.Message}", "Шаблоны печати", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void RefreshAssignedTemplateNames()
+    {
+        foreach (var file in Files)
+        {
+            var template = Templates.FirstOrDefault(item => item.Id == file.AssignedTemplateId);
+            if (template is not null)
+            {
+                file.TemplateName = template.Name;
+            }
+        }
+    }
+
+    private void Files_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(FilesSummary));
+        OnPropertyChanged(nameof(CanPrint));
+    }
+
+    private void ConversionFiles_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(ConversionSummary));
+        OnPropertyChanged(nameof(CanConvert));
+    }
+
+    private void ScanPages_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(ScanPagesSummary));
+        OnPropertyChanged(nameof(CanSaveScans));
+        OnPropertyChanged(nameof(CanEditScans));
+    }
+
+    private void SelectedTemplate_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PrintTemplate.Name))
+        {
+            RefreshAssignedTemplateNames();
+        }
+
+        if (IsLoaded)
+        {
+            UpdatePreview();
+        }
+    }
+
+    private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(storage, value))
+        {
+            return false;
+        }
+
+        storage = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
