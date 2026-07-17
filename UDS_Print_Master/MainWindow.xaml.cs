@@ -20,6 +20,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using UDS_Print_Master.Models;
 using UDS_Print_Master.Services;
+using UDS_Print_Master.Utilities;
 
 namespace UDS_Print_Master;
 
@@ -92,6 +93,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ScannerCapabilities? _selectedScannerCapabilities;
     private ScanPageItem? _selectedScanPage;
     private BitmapSource? _selectedScanPreview;
+    private double _scanPreviewZoom = 100;
+    private bool _isScanPreviewExpanded;
+    private bool _isScanPreviewDragging;
+    private Point _scanPreviewDragStart;
+    private double _scanPreviewDragStartHorizontalOffset;
+    private double _scanPreviewDragStartVerticalOffset;
+    private ScrollViewer? _activeScanPreviewScrollViewer;
     private string _selectedScanSource = "Flatbed";
     private string _selectedScanMode = "Simplex";
     private string _selectedScanColorMode = "Color";
@@ -261,7 +269,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (SetProperty(ref _selectedScanPage, value))
             {
-                SelectedScanPreview = value is null ? null : LoadScanBitmap(value.ImagePath, 1100);
+                SelectedScanPreview = value is null ? null : LoadScanBitmap(value.ImagePath, 2400);
+                SetScanPreviewZoom(100);
+                if (value is null)
+                {
+                    IsScanPreviewExpanded = false;
+                }
             }
         }
     }
@@ -269,7 +282,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public BitmapSource? SelectedScanPreview
     {
         get => _selectedScanPreview;
-        private set => SetProperty(ref _selectedScanPreview, value);
+        private set
+        {
+            if (SetProperty(ref _selectedScanPreview, value))
+            {
+                OnPropertyChanged(nameof(CanExpandScanPreview));
+            }
+        }
+    }
+
+    public double ScanPreviewScale => _scanPreviewZoom / 100d;
+
+    public string ScanPreviewZoomText => $"{_scanPreviewZoom:0}%";
+
+    public bool CanExpandScanPreview => SelectedScanPreview is not null;
+
+    public bool IsScanPreviewExpanded
+    {
+        get => _isScanPreviewExpanded;
+        private set => SetProperty(ref _isScanPreviewExpanded, value);
     }
 
     public string SelectedScanSource
@@ -551,6 +582,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         else if (!scanningWorkspace)
         {
             _scannerWakeCancellation?.Cancel();
+            IsScanPreviewExpanded = false;
         }
     }
 
@@ -1357,6 +1389,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        var groups = BuildScanDocumentGroups();
+        var defaultBaseName = string.IsNullOrWhiteSpace(ScanBaseFileName) ? "Документ" : ScanBaseFileName.Trim();
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var documentName = groups[index][0].DocumentName;
+            var validationError = WindowsFileNameRules.GetValidationError(documentName);
+            if (validationError is null)
+            {
+                continue;
+            }
+
+            SelectedScanPage = groups[index][0];
+            ScansList.ScrollIntoView(SelectedScanPage);
+            ScanStatus = $"Исправьте имя документа {index + 1}: {validationError}";
+            MessageBox.Show(
+                this,
+                $"Документ {index + 1}: {validationError}\n\nНельзя использовать символы \\ / : * ? \" < > |, системные имена CON, PRN, AUX, NUL, COM1–COM9 и LPT1–LPT9.",
+                "Имя PDF-файла",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         var dialog = new OpenFolderDialog
         {
             Title = "Выберите папку для сохранения отсканированных PDF",
@@ -1368,8 +1423,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var groups = BuildScanDocumentGroups();
-        var defaultBaseName = string.IsNullOrWhiteSpace(ScanBaseFileName) ? "Документ" : ScanBaseFileName.Trim();
         IsSavingScans = true;
         var savedCount = 0;
 
@@ -1378,9 +1431,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             for (var index = 0; index < groups.Count; index++)
             {
                 ScanStatus = $"Сохранение документа {index + 1} из {groups.Count}...";
-                var documentName = string.IsNullOrWhiteSpace(groups[index][0].DocumentName)
-                    ? $"{defaultBaseName} {index + 1}"
-                    : groups[index][0].DocumentName;
+                var documentName = GetScanDocumentName(groups[index], index, defaultBaseName);
                 var requestedName = $"{MakeSafeFileName(documentName)}.pdf";
                 var outputPath = CreatePermanentPdfPath(requestedName, dialog.FolderName);
 
@@ -1407,6 +1458,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             IsSavingScans = false;
         }
+    }
+
+    private static string GetScanDocumentName(IReadOnlyList<ScanPageItem> group, int index, string defaultBaseName)
+    {
+        return string.IsNullOrWhiteSpace(group[0].DocumentName)
+            ? $"{defaultBaseName} {index + 1}"
+            : group[0].DocumentName;
     }
 
     private List<List<ScanPageItem>> BuildScanDocumentGroups()
@@ -2337,10 +2395,172 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static string MakeSafeFileName(string fileName)
     {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var safeChars = fileName.Select(character => invalidChars.Contains(character) ? '_' : character).ToArray();
-        var safeName = new string(safeChars).Trim();
-        return string.IsNullOrWhiteSpace(safeName) ? "document" : safeName;
+        return WindowsFileNameRules.Sanitize(fileName, "document");
+    }
+
+    private void ScanPreviewZoomOut_Click(object sender, RoutedEventArgs e)
+    {
+        SetScanPreviewZoom(_scanPreviewZoom - 10);
+    }
+
+    private void ScanPreviewZoomIn_Click(object sender, RoutedEventArgs e)
+    {
+        SetScanPreviewZoom(_scanPreviewZoom + 10);
+    }
+
+    private void ResetScanPreviewZoom_Click(object sender, RoutedEventArgs e)
+    {
+        SetScanPreviewZoom(100);
+        ScrollScanPreviewToOrigin();
+    }
+
+    private void ExpandScanPreview_Click(object sender, RoutedEventArgs e)
+    {
+        OpenExpandedScanPreview();
+    }
+
+    private void CloseScanPreview_Click(object sender, RoutedEventArgs e)
+    {
+        CloseExpandedScanPreview();
+    }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && IsScanPreviewExpanded)
+        {
+            CloseExpandedScanPreview();
+            e.Handled = true;
+        }
+    }
+
+    private void OpenExpandedScanPreview()
+    {
+        if (SelectedScanPreview is null)
+        {
+            return;
+        }
+
+        StopScanPreviewDrag();
+        IsScanPreviewExpanded = true;
+        SetScanPreviewZoom(100);
+        Dispatcher.BeginInvoke(ScrollScanPreviewToOrigin, DispatcherPriority.Loaded);
+    }
+
+    private void CloseExpandedScanPreview()
+    {
+        StopScanPreviewDrag();
+        IsScanPreviewExpanded = false;
+        SetScanPreviewZoom(100);
+        Dispatcher.BeginInvoke(ScrollScanPreviewToOrigin, DispatcherPriority.Loaded);
+        ScansList.Focus();
+    }
+
+    private void SetScanPreviewZoom(double zoom)
+    {
+        var normalizedZoom = Math.Clamp(Math.Round(zoom / 10) * 10, 50, 400);
+        if (Math.Abs(_scanPreviewZoom - normalizedZoom) < 0.1)
+        {
+            return;
+        }
+
+        _scanPreviewZoom = normalizedZoom;
+        OnPropertyChanged(nameof(ScanPreviewScale));
+        OnPropertyChanged(nameof(ScanPreviewZoomText));
+    }
+
+    private void ScanPreview_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0)
+        {
+            return;
+        }
+
+        SetScanPreviewZoom(_scanPreviewZoom + (e.Delta > 0 ? 10 : -10));
+        e.Handled = true;
+    }
+
+    private void ScanPreview_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ScrollViewer scrollViewer || SelectedScanPreview is null)
+        {
+            return;
+        }
+
+        if (IsFromScrollControl(e.OriginalSource, scrollViewer))
+        {
+            return;
+        }
+
+        if (e.ClickCount == 2 && !IsScanPreviewExpanded)
+        {
+            OpenExpandedScanPreview();
+            e.Handled = true;
+            return;
+        }
+
+        _isScanPreviewDragging = true;
+        _activeScanPreviewScrollViewer = scrollViewer;
+        _scanPreviewDragStart = e.GetPosition(scrollViewer);
+        _scanPreviewDragStartHorizontalOffset = scrollViewer.HorizontalOffset;
+        _scanPreviewDragStartVerticalOffset = scrollViewer.VerticalOffset;
+        scrollViewer.Cursor = Cursors.SizeAll;
+        scrollViewer.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void ScanPreview_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isScanPreviewDragging || _activeScanPreviewScrollViewer is null)
+        {
+            return;
+        }
+
+        var currentPosition = e.GetPosition(_activeScanPreviewScrollViewer);
+        var delta = currentPosition - _scanPreviewDragStart;
+        _activeScanPreviewScrollViewer.ScrollToHorizontalOffset(_scanPreviewDragStartHorizontalOffset - delta.X);
+        _activeScanPreviewScrollViewer.ScrollToVerticalOffset(_scanPreviewDragStartVerticalOffset - delta.Y);
+        e.Handled = true;
+    }
+
+    private void ScanPreview_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_isScanPreviewDragging)
+        {
+            StopScanPreviewDrag();
+            e.Handled = true;
+        }
+    }
+
+    private void ScanPreview_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            StopScanPreviewDrag();
+        }
+    }
+
+    private void StopScanPreviewDrag()
+    {
+        if (_activeScanPreviewScrollViewer is not null)
+        {
+            _activeScanPreviewScrollViewer.Cursor = Cursors.Hand;
+            if (_activeScanPreviewScrollViewer.IsMouseCaptured)
+            {
+                _activeScanPreviewScrollViewer.ReleaseMouseCapture();
+            }
+        }
+
+        _activeScanPreviewScrollViewer = null;
+        _isScanPreviewDragging = false;
+    }
+
+    private void ScrollScanPreviewToOrigin()
+    {
+        var scrollViewer = IsScanPreviewExpanded
+            ? ExpandedScanPreviewScrollViewer
+            : ScanPreviewScrollViewer;
+        scrollViewer.ScrollToHorizontalOffset(0);
+        scrollViewer.ScrollToVerticalOffset(0);
     }
 
     private void PreviewDrag_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

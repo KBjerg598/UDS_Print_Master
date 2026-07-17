@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media.Imaging;
+using UDS_Print_Master.Utilities;
 
 namespace UDS_Print_Master.Models;
 
@@ -73,9 +74,11 @@ public sealed class ScanPageItem : INotifyPropertyChanged
         set
         {
             _hasCustomDocumentName = !string.IsNullOrWhiteSpace(value);
-            if (SetProperty(ref _documentName, value?.Trim() ?? string.Empty))
+            if (SetProperty(ref _documentName, value ?? string.Empty))
             {
                 OnPropertyChanged(nameof(DocumentLabel));
+                OnPropertyChanged(nameof(IsDocumentNameValid));
+                OnPropertyChanged(nameof(DocumentNameValidationMessage));
             }
         }
     }
@@ -85,6 +88,10 @@ public sealed class ScanPageItem : INotifyPropertyChanged
         : DocumentName;
 
     public string PageLabel => $"Страница {PageInDocument}";
+
+    public bool IsDocumentNameValid => WindowsFileNameRules.GetValidationError(DocumentName) is null;
+
+    public string DocumentNameValidationMessage => WindowsFileNameRules.GetValidationError(DocumentName) ?? string.Empty;
 
     public void SetDefaultDocumentName(string value)
     {
@@ -96,6 +103,8 @@ public sealed class ScanPageItem : INotifyPropertyChanged
         if (SetProperty(ref _documentName, value))
         {
             OnPropertyChanged(nameof(DocumentLabel));
+            OnPropertyChanged(nameof(IsDocumentNameValid));
+            OnPropertyChanged(nameof(DocumentNameValidationMessage));
         }
     }
 

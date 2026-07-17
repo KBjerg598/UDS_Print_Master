@@ -17,6 +17,7 @@
         AllowDrop="True"
         DragOver="Window_DragOver"
         Drop="Window_Drop"
+        PreviewKeyDown="Window_PreviewKeyDown"
         UseLayoutRounding="True">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -617,7 +618,7 @@
                                 <ColumnDefinition Width="16" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="330" />
+                                <ColumnDefinition Width="420" />
                             </Grid.ColumnDefinitions>
 
                             <Border Grid.Column="0"
@@ -851,22 +852,59 @@
                                                         <RowDefinition Height="Auto" />
                                                         <RowDefinition Height="Auto" />
                                                     </Grid.RowDefinitions>
-                                                    <Border Background="#DBEAFE"
-                                                            BorderBrush="#93C5FD"
-                                                            BorderThickness="1"
+                                                    <Border BorderThickness="1"
                                                             CornerRadius="4"
                                                             Padding="6,3"
                                                             Margin="0,0,0,5"
+                                                            ToolTip="{Binding DocumentNameValidationMessage}"
                                                             Visibility="{Binding IsDocumentStart, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                        <TextBox Text="{Binding DocumentName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                 Background="Transparent"
-                                                                 BorderThickness="0"
-                                                                 Padding="2,0"
-                                                                 Foreground="#1D4ED8"
-                                                                 FontSize="11"
-                                                                 FontWeight="SemiBold"
-                                                                 TextAlignment="Center"
-                                                                 ToolTip="Имя сохраняемого PDF" />
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Background" Value="#DBEAFE" />
+                                                                <Setter Property="BorderBrush" Value="#93C5FD" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsDocumentNameValid}" Value="False">
+                                                                        <Setter Property="Background" Value="#FEF2F2" />
+                                                                        <Setter Property="BorderBrush" Value="#F87171" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBox Text="{Binding DocumentName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                     MaxLength="120"
+                                                                     Background="Transparent"
+                                                                     BorderThickness="0"
+                                                                     Padding="2,0"
+                                                                     Foreground="#1D4ED8"
+                                                                     FontSize="11"
+                                                                     FontWeight="SemiBold"
+                                                                     TextAlignment="Center"
+                                                                     ToolTip="{Binding DocumentNameValidationMessage}" />
+                                                            <materialDesign:PackIcon Grid.Column="1"
+                                                                                     Kind="AlertCircleOutline"
+                                                                                     Width="16"
+                                                                                     Height="16"
+                                                                                     Margin="3,0,0,0"
+                                                                                     Foreground="#B91C1C"
+                                                                                     ToolTip="{Binding DocumentNameValidationMessage}"
+                                                                                     VerticalAlignment="Center">
+                                                                <materialDesign:PackIcon.Style>
+                                                                    <Style TargetType="materialDesign:PackIcon">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsDocumentNameValid}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </materialDesign:PackIcon.Style>
+                                                            </materialDesign:PackIcon>
+                                                        </Grid>
                                                     </Border>
                                                     <Border Grid.Row="1"
                                                             Background="White"
@@ -899,18 +937,87 @@
                                     <RowDefinition Height="*" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="Просмотр страницы"
-                                           FontSize="18"
-                                           FontWeight="SemiBold"
-                                           Margin="0,0,0,10" />
-                                <Border Grid.Row="1"
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Просмотр страницы"
+                                               FontSize="18"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Style="{StaticResource MaterialDesignIconButton}"
+                                                Width="36"
+                                                Height="36"
+                                                Padding="6"
+                                                Click="ScanPreviewZoomOut_Click"
+                                                ToolTip="Уменьшить">
+                                            <materialDesign:PackIcon Kind="MagnifyMinusOutline" Width="20" Height="20" />
+                                        </Button>
+                                        <TextBlock Text="{Binding ScanPreviewZoomText}"
+                                                   Width="48"
+                                                   TextAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   FontWeight="SemiBold" />
+                                        <Button Style="{StaticResource MaterialDesignIconButton}"
+                                                Width="36"
+                                                Height="36"
+                                                Padding="6"
+                                                Click="ScanPreviewZoomIn_Click"
+                                                ToolTip="Увеличить">
+                                            <materialDesign:PackIcon Kind="MagnifyPlusOutline" Width="20" Height="20" />
+                                        </Button>
+                                        <Button Style="{StaticResource MaterialDesignIconButton}"
+                                                Width="36"
+                                                Height="36"
+                                                Padding="6"
+                                                Click="ExpandScanPreview_Click"
+                                                IsEnabled="{Binding CanExpandScanPreview}"
+                                                ToolTip="Развернуть просмотр">
+                                            <materialDesign:PackIcon Kind="Fullscreen" Width="20" Height="20" />
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <Border x:Name="ScanPreviewHost"
+                                        Grid.Row="1"
                                         Background="#E9EEF5"
                                         BorderBrush="{StaticResource AppLineBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8"
-                                        Padding="12">
-                                    <Image Source="{Binding SelectedScanPreview}"
-                                           Stretch="Uniform" />
+                                        ClipToBounds="True"
+                                        ToolTip="Двойной щелчок разворачивает страницу">
+                                    <ScrollViewer x:Name="ScanPreviewScrollViewer"
+                                                  HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalContentAlignment="Stretch"
+                                                  VerticalContentAlignment="Stretch"
+                                                  Cursor="Hand"
+                                                  PreviewMouseLeftButtonDown="ScanPreview_MouseLeftButtonDown"
+                                                  PreviewMouseMove="ScanPreview_MouseMove"
+                                                  PreviewMouseLeftButtonUp="ScanPreview_MouseLeftButtonUp"
+                                                  PreviewMouseWheel="ScanPreview_MouseWheel"
+                                                  MouseLeave="ScanPreview_MouseLeave">
+                                        <Grid MinWidth="{Binding ViewportWidth, ElementName=ScanPreviewScrollViewer}"
+                                              MinHeight="{Binding ViewportHeight, ElementName=ScanPreviewScrollViewer}">
+                                            <Border Width="350"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Background="White"
+                                                    BorderBrush="#CBD5E1"
+                                                    BorderThickness="1"
+                                                    Margin="18"
+                                                    Padding="2">
+                                                <Border.LayoutTransform>
+                                                    <ScaleTransform ScaleX="{Binding ScanPreviewScale}"
+                                                                    ScaleY="{Binding ScanPreviewScale}" />
+                                                </Border.LayoutTransform>
+                                                <Image Source="{Binding SelectedScanPreview}"
+                                                       Stretch="Uniform"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                            </Border>
+                                        </Grid>
+                                    </ScrollViewer>
                                 </Border>
                                 <Button Grid.Row="2"
                                         Style="{StaticResource MaterialDesignRaisedButton}"
@@ -1052,6 +1159,105 @@
                     </Border>
                 </Grid>
             </materialDesign:Card>
+        </Grid>
+
+        <Grid Grid.RowSpan="2"
+              Margin="-18"
+              Panel.ZIndex="100"
+              Background="#F8FAFC"
+              Visibility="{Binding IsScanPreviewExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="68" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Background="White"
+                    BorderBrush="{StaticResource AppLineBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="20,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Просмотр скана"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center">
+                        <Button Style="{StaticResource MaterialDesignIconButton}"
+                                Click="ScanPreviewZoomOut_Click"
+                                ToolTip="Уменьшить">
+                            <materialDesign:PackIcon Kind="MagnifyMinusOutline" Width="22" Height="22" />
+                        </Button>
+                        <TextBlock Text="{Binding ScanPreviewZoomText}"
+                                   Width="60"
+                                   TextAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontWeight="SemiBold" />
+                        <Button Style="{StaticResource MaterialDesignIconButton}"
+                                Click="ScanPreviewZoomIn_Click"
+                                ToolTip="Увеличить">
+                            <materialDesign:PackIcon Kind="MagnifyPlusOutline" Width="22" Height="22" />
+                        </Button>
+                        <Button Style="{StaticResource MaterialDesignIconButton}"
+                                Click="ResetScanPreviewZoom_Click"
+                                ToolTip="Вместить страницу">
+                            <materialDesign:PackIcon Kind="FitToPageOutline" Width="22" Height="22" />
+                        </Button>
+                    </StackPanel>
+                    <Button Grid.Column="2"
+                            HorizontalAlignment="Right"
+                            Style="{StaticResource MaterialDesignIconButton}"
+                            Click="CloseScanPreview_Click"
+                            ToolTip="Закрыть просмотр">
+                        <materialDesign:PackIcon Kind="Close" Width="24" Height="24" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Margin="20"
+                    Background="#E9EEF5"
+                    BorderBrush="{StaticResource AppLineBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    ClipToBounds="True">
+                <ScrollViewer x:Name="ExpandedScanPreviewScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Stretch"
+                              Cursor="Hand"
+                              PreviewMouseLeftButtonDown="ScanPreview_MouseLeftButtonDown"
+                              PreviewMouseMove="ScanPreview_MouseMove"
+                              PreviewMouseLeftButtonUp="ScanPreview_MouseLeftButtonUp"
+                              PreviewMouseWheel="ScanPreview_MouseWheel"
+                              MouseLeave="ScanPreview_MouseLeave">
+                    <Grid MinWidth="{Binding ViewportWidth, ElementName=ExpandedScanPreviewScrollViewer}"
+                          MinHeight="{Binding ViewportHeight, ElementName=ExpandedScanPreviewScrollViewer}">
+                        <Border Width="430"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="White"
+                                BorderBrush="#CBD5E1"
+                                BorderThickness="1"
+                                Margin="28"
+                                Padding="2">
+                            <Border.LayoutTransform>
+                                <ScaleTransform ScaleX="{Binding ScanPreviewScale}"
+                                                ScaleY="{Binding ScanPreviewScale}" />
+                            </Border.LayoutTransform>
+                            <Image Source="{Binding SelectedScanPreview}"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
         </Grid>
 
         <wv2:WebView2 x:Name="ConversionPdfBrowser"
