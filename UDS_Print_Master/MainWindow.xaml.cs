@@ -95,9 +95,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _selectedScanSource = "Flatbed";
     private string _selectedScanMode = "Simplex";
     private string _selectedScanColorMode = "Color";
-    private int _selectedScanDpi = 300;
+    private int? _selectedScanDpi = 300;
     private string _scanStatus = "Выберите сканер и источник бумаги.";
-    private string _scanBaseFileName = "Скан";
+    private string _scanBaseFileName = "Документ";
     private bool _isScanning;
     private bool _isSavingScans;
     private bool _isWakingScanner;
@@ -133,7 +133,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<ScannerDeviceInfo> Scanners { get; } = [];
 
-    public ObservableCollection<int> AvailableScanDpi { get; } = [150, 300, 600];
+    public ObservableCollection<int> AvailableScanDpi { get; } = [150, 200, 300];
 
     public ObservableCollection<ScanPageItem> ScanPages { get; } = [];
 
@@ -182,7 +182,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string SelectedPrinterName
     {
         get => _selectedPrinterName;
-        set => SetProperty(ref _selectedPrinterName, value);
+        set
+        {
+            if (SetProperty(ref _selectedPrinterName, value))
+            {
+                RefreshAvailableScanDpi();
+            }
+        }
     }
 
     public string CurrentPrintingFile
@@ -237,6 +243,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return;
             }
 
+            RefreshAvailableScanDpi();
+
             if (!_suppressScannerCapabilityLoading && IsLoaded && MainWorkspaceTabs.SelectedIndex == 2)
             {
                 _ = LoadSelectedScannerCapabilitiesAsync();
@@ -271,6 +279,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (SetProperty(ref _selectedScanSource, value))
             {
+                RefreshAvailableScanDpi();
                 OnPropertyChanged(nameof(CanStartScan));
             }
         }
@@ -291,10 +300,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string SelectedScanColorMode
     {
         get => _selectedScanColorMode;
-        set => SetProperty(ref _selectedScanColorMode, value);
+        set
+        {
+            if (SetProperty(ref _selectedScanColorMode, value))
+            {
+                RefreshAvailableScanDpi();
+            }
+        }
     }
 
-    public int SelectedScanDpi
+    public int? SelectedScanDpi
     {
         get => _selectedScanDpi;
         set => SetProperty(ref _selectedScanDpi, value);
@@ -309,7 +324,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string ScanBaseFileName
     {
         get => _scanBaseFileName;
-        set => SetProperty(ref _scanBaseFileName, value);
+        set
+        {
+            if (SetProperty(ref _scanBaseFileName, value))
+            {
+                RenumberScanPages();
+            }
+        }
     }
 
     public string ScanPagesSummary => ScanPages.Count == 0
@@ -339,8 +360,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var duplex = _selectedScannerCapabilities.SupportsDuplex
                 ? "двустороннее сканирование доступно"
                 : "только одностороннее сканирование";
-            return $"Источники: {string.Join(", ", sources)} · {duplex}";
+            var modeFiltered = _selectedScannerCapabilities.SupportedDpi.Except(AvailableScanDpi).Any();
+            var dpiSource = modeFiltered
+                ? "для выбранного источника и цвета"
+                : _selectedScannerCapabilities.DpiReportedByDriver
+                    ? "сообщены драйвером"
+                    : "безопасный диапазон, проверяется при запуске";
+            var dpiValues = string.Join(", ", AvailableScanDpi);
+            return $"Источники: {string.Join(", ", sources)} · {duplex}\nDPI ({dpiSource}): {dpiValues}";
         }
+    }
+
+    private void RefreshAvailableScanDpi()
+    {
+        IEnumerable<int> values = _selectedScannerCapabilities?.SupportedDpi ?? [150, 200, 300];
+        var deviceIdentity = $"{SelectedScanner?.Name} {SelectedPrinterName}";
+        if (deviceIdentity.Contains("M521", StringComparison.OrdinalIgnoreCase)
+            || deviceIdentity.Contains("M570", StringComparison.OrdinalIgnoreCase))
+        {
+            var maximumDpi = SelectedScanSource == "Feeder"
+                ? 300
+                : SelectedScanColorMode == "Color" ? 600 : 1200;
+            values = values.Where(value => value <= maximumDpi);
+        }
+
+        var supportedValues = values.Distinct().OrderBy(value => value).ToList();
+        if (supportedValues.Count == 0)
+        {
+            supportedValues.Add(300);
+        }
+
+        AvailableScanDpi.Clear();
+        foreach (var dpi in supportedValues)
+        {
+            AvailableScanDpi.Add(dpi);
+        }
+
+        if (SelectedScanDpi is not int selectedDpi || !AvailableScanDpi.Contains(selectedDpi))
+        {
+            SelectedScanDpi = AvailableScanDpi.OrderBy(value => Math.Abs(value - 300)).First();
+        }
+
+        OnPropertyChanged(nameof(ScannerCapabilityText));
     }
 
     public bool CanPrint => Files.Count > 0 && !IsPrinting && !IsConverting && !IsScanning && !IsSavingScans;
@@ -937,16 +998,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             _selectedScannerCapabilities = capabilities;
-            AvailableScanDpi.Clear();
-            foreach (var dpi in capabilities.SupportedDpi)
-            {
-                AvailableScanDpi.Add(dpi);
-            }
-
-            if (!AvailableScanDpi.Contains(SelectedScanDpi))
-            {
-                SelectedScanDpi = AvailableScanDpi.OrderBy(value => Math.Abs(value - 300)).FirstOrDefault(300);
-            }
+            RefreshAvailableScanDpi();
 
             if (SelectedScanSource == "Feeder" && !capabilities.HasFeeder)
             {
@@ -1078,6 +1130,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var useFeeder = SelectedScanSource == "Feeder";
         var duplex = SelectedScanMode == "Duplex";
+        var selectedDpi = SelectedScanDpi ?? AvailableScanDpi.FirstOrDefault(300);
+
+        if (!AvailableScanDpi.Contains(selectedDpi))
+        {
+            var supportedValues = string.Join(", ", AvailableScanDpi);
+            MessageBox.Show(
+                this,
+                $"Сканер не поддерживает {selectedDpi} DPI в текущей конфигурации. Доступные значения: {supportedValues} DPI.",
+                "Разрешение сканирования",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
 
         if (useFeeder && !capabilities.HasFeeder)
         {
@@ -1108,7 +1173,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             scanner.DeviceId,
             useFeeder,
             duplex,
-            SelectedScanDpi,
+            selectedDpi,
             SelectedScanColorMode,
             tempFolder);
 
@@ -1304,7 +1369,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var groups = BuildScanDocumentGroups();
-        var baseName = MakeSafeFileName(string.IsNullOrWhiteSpace(ScanBaseFileName) ? "Скан" : ScanBaseFileName);
+        var defaultBaseName = string.IsNullOrWhiteSpace(ScanBaseFileName) ? "Документ" : ScanBaseFileName.Trim();
         IsSavingScans = true;
         var savedCount = 0;
 
@@ -1313,9 +1378,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             for (var index = 0; index < groups.Count; index++)
             {
                 ScanStatus = $"Сохранение документа {index + 1} из {groups.Count}...";
-                var requestedName = groups.Count == 1
-                    ? $"{baseName}.pdf"
-                    : $"{baseName} - документ {index + 1:00}.pdf";
+                var documentName = string.IsNullOrWhiteSpace(groups[index][0].DocumentName)
+                    ? $"{defaultBaseName} {index + 1}"
+                    : groups[index][0].DocumentName;
+                var requestedName = $"{MakeSafeFileName(documentName)}.pdf";
                 var outputPath = CreatePermanentPdfPath(requestedName, dialog.FolderName);
 
                 try
@@ -1426,7 +1492,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                             page-break-after: always;
                         }
                         .page:last-child { break-after: auto; page-break-after: auto; }
-                        img { display: block; width: 100%; height: 100%; object-fit: contain; }
+                        img { display: block; width: 100%; height: 100%; object-fit: cover; }
                     </style>
                 </head>
                 <body>{{pageMarkup}}</body>
@@ -1505,6 +1571,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 documentNumber++;
                 pageInDocument = 0;
+                var baseName = string.IsNullOrWhiteSpace(ScanBaseFileName) ? "Документ" : ScanBaseFileName.Trim();
+                page.SetDefaultDocumentName($"{baseName} {documentNumber}");
             }
 
             pageInDocument++;

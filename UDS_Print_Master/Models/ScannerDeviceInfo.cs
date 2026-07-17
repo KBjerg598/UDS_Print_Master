@@ -17,7 +17,8 @@ public sealed record ScannerCapabilities(
     bool HasFlatbed,
     bool HasFeeder,
     bool SupportsDuplex,
-    IReadOnlyList<int> SupportedDpi);
+    IReadOnlyList<int> SupportedDpi,
+    bool DpiReportedByDriver);
 
 public sealed record ScanRequest(
     string DeviceId,

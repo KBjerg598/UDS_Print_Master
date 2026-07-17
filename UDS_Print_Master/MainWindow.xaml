@@ -630,15 +630,22 @@
                                               HorizontalScrollBarVisibility="Disabled">
                                     <StackPanel>
                                         <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
                                             <TextBlock Text="Параметры сканирования"
-                                                       FontSize="18"
+                                                       FontSize="17"
                                                        FontWeight="SemiBold"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,8,0"
                                                        VerticalAlignment="Center" />
-                                            <Button HorizontalAlignment="Right"
+                                            <Button Grid.Column="1"
+                                                    HorizontalAlignment="Right"
                                                     Style="{StaticResource MaterialDesignIconButton}"
                                                     Click="RefreshScanners_Click"
                                                     IsEnabled="{Binding CanWakeScanner}"
-                                                    ToolTip="Обновить список сканеров">
+                                                    ToolTip="Пробудить и обновить сканер">
                                                 <materialDesign:PackIcon Kind="Refresh"
                                                                          Width="21"
                                                                          Height="21" />
@@ -674,7 +681,7 @@
                                                   SelectedItem="{Binding SelectedScanDpi, Mode=TwoWay}"
                                                   IsEnabled="{Binding CanWakeScanner}"
                                                   Style="{StaticResource SettingsComboBox}"
-                                                  materialDesign:HintAssist.Hint="Разрешение сканирования (DPI)" />
+                                                  materialDesign:HintAssist.Hint="Разрешение (DPI)" />
 
                                         <ComboBox SelectedValue="{Binding SelectedScanColorMode, Mode=TwoWay}"
                                                   SelectedValuePath="Tag"
@@ -688,7 +695,7 @@
 
                                         <TextBox Text="{Binding ScanBaseFileName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                  Style="{StaticResource SettingsTextBox}"
-                                                 materialDesign:HintAssist.Hint="Имя сохраняемых PDF" />
+                                                 materialDesign:HintAssist.Hint="Префикс новых документов" />
 
                                         <Border Background="#EAF2FF"
                                                 BorderBrush="#C7D7FE"
@@ -701,9 +708,6 @@
                                                            TextWrapping="Wrap"
                                                            FontSize="12"
                                                            Foreground="#334155" />
-                                                <TextBlock Text="300 DPI подходит для большинства документов. 600 DPI лучше для мелкого текста, но создаёт более тяжёлые файлы."
-                                                           Style="{StaticResource SmallMutedText}"
-                                                           Margin="0,8,0,0" />
                                             </StackPanel>
                                         </Border>
 
@@ -842,7 +846,7 @@
                                         </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
-                                                <Grid Width="142">
+                                                <Grid Width="158">
                                                     <Grid.RowDefinitions>
                                                         <RowDefinition Height="Auto" />
                                                         <RowDefinition Height="Auto" />
@@ -854,11 +858,15 @@
                                                             Padding="6,3"
                                                             Margin="0,0,0,5"
                                                             Visibility="{Binding IsDocumentStart, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                        <TextBlock Text="{Binding DocumentLabel}"
-                                                                   Foreground="#1D4ED8"
-                                                                   FontSize="11"
-                                                                   FontWeight="SemiBold"
-                                                                   TextAlignment="Center" />
+                                                        <TextBox Text="{Binding DocumentName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                 Background="Transparent"
+                                                                 BorderThickness="0"
+                                                                 Padding="2,0"
+                                                                 Foreground="#1D4ED8"
+                                                                 FontSize="11"
+                                                                 FontWeight="SemiBold"
+                                                                 TextAlignment="Center"
+                                                                 ToolTip="Имя сохраняемого PDF" />
                                                     </Border>
                                                     <Border Grid.Row="1"
                                                             Background="White"

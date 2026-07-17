@@ -24,6 +24,8 @@ public sealed class WiaScannerService
     private const int ColorIntent = 1;
     private const int GrayscaleIntent = 2;
     private const int TextIntent = 4;
+    private const double A4WidthMillimeters = 210d;
+    private const double A4HeightMillimeters = 297d;
 
     private const uint WiaErrorPaperJam = 0x80210002;
     private const uint WiaErrorPaperEmpty = 0x80210003;
@@ -129,7 +131,12 @@ public sealed class WiaScannerService
             var supportedDpi = ReadSupportedDpi(item.Properties);
             ReleaseComObject(item);
 
-            return new ScannerCapabilities(hasFlatbed, hasFeeder, supportsDuplex, supportedDpi);
+            return new ScannerCapabilities(
+                hasFlatbed,
+                hasFeeder,
+                supportsDuplex,
+                supportedDpi.Values,
+                supportedDpi.ReportedByDriver);
         }
         finally
         {
@@ -223,8 +230,14 @@ public sealed class WiaScannerService
         SetProperty(item.Properties, VerticalResolutionProperty, request.Dpi, required: true);
         SetProperty(item.Properties, HorizontalStartPositionProperty, 0);
         SetProperty(item.Properties, VerticalStartPositionProperty, 0);
-        SetPropertyToMaximum(item.Properties, HorizontalExtentProperty);
-        SetPropertyToMaximum(item.Properties, VerticalExtentProperty);
+        SetPropertyWithinBounds(
+            item.Properties,
+            HorizontalExtentProperty,
+            MillimetersToPixels(A4WidthMillimeters, request.Dpi));
+        SetPropertyWithinBounds(
+            item.Properties,
+            VerticalExtentProperty,
+            MillimetersToPixels(A4HeightMillimeters, request.Dpi));
     }
 
     private static object Connect(string deviceId)
@@ -266,12 +279,13 @@ public sealed class WiaScannerService
         }
     }
 
-    private static IReadOnlyList<int> ReadSupportedDpi(dynamic properties)
+    private static ScannerDpiCapabilities ReadSupportedDpi(dynamic properties)
     {
+        int[] safeFallback = [150, 200, 300];
         object? propertyObject = FindProperty(properties, HorizontalResolutionProperty);
         if (propertyObject is null)
         {
-            return [150, 300, 600];
+            return new ScannerDpiCapabilities(safeFallback, false);
         }
 
         try
@@ -282,14 +296,30 @@ public sealed class WiaScannerService
                 .OrderBy(value => value)
                 .ToList();
 
-            if (values.Count == 0)
+            if (values.Count > 0)
             {
-                var minimum = ReadSubtypeBound(propertyObject, maximum: false) ?? 75;
-                var maximum = ReadSubtypeBound(propertyObject, maximum: true) ?? 1200;
-                values.AddRange(new[] { 150, 200, 300, 400, 600, 1200 }.Where(value => value >= minimum && value <= maximum));
+                return new ScannerDpiCapabilities(values, true);
             }
 
-            return values.Count > 0 ? values : [300];
+            var minimum = ReadSubtypeBound(propertyObject, maximum: false);
+            var maximum = ReadSubtypeBound(propertyObject, maximum: true);
+            var step = ReadSubtypeStep(propertyObject);
+            if (minimum is null || maximum is null || minimum <= 0 || maximum < minimum)
+            {
+                return new ScannerDpiCapabilities(safeFallback, false);
+            }
+
+            var commonValues = new[] { 75, 100, 150, 200, 300, 400, 600, 1200, 2400 }
+                .Where(value => value >= minimum && value <= maximum)
+                .Where(value => step is null or <= 0 || (value - minimum.Value) % step.Value == 0)
+                .ToList();
+
+            if (commonValues.Count == 0)
+            {
+                commonValues.Add(Math.Clamp(300, minimum.Value, maximum.Value));
+            }
+
+            return new ScannerDpiCapabilities(commonValues, true);
         }
         finally
         {
@@ -444,7 +474,7 @@ public sealed class WiaScannerService
         }
     }
 
-    private static void SetPropertyToMaximum(dynamic properties, int propertyId)
+    private static void SetPropertyWithinBounds(dynamic properties, int propertyId, int requestedValue)
     {
         object? propertyObject = FindProperty(properties, propertyId);
         if (propertyObject is null)
@@ -455,15 +485,23 @@ public sealed class WiaScannerService
         try
         {
             dynamic property = propertyObject;
+            var minimum = ReadSubtypeBound(propertyObject, maximum: false) ?? 1;
             var maximum = ReadSubtypeBound(propertyObject, maximum: true);
-            if (maximum is not null)
+            var step = ReadSubtypeStep(propertyObject);
+            var value = maximum is null
+                ? requestedValue
+                : Math.Clamp(requestedValue, minimum, maximum.Value);
+
+            if (step is > 0)
             {
-                property.Value = maximum.Value;
+                value = minimum + ((value - minimum) / step.Value * step.Value);
             }
+
+            property.Value = value;
         }
         catch
         {
-            // The driver can select the full scan area itself.
+            // The driver can select the page area itself when extents are read-only.
         }
         finally
         {
@@ -484,6 +522,24 @@ public sealed class WiaScannerService
         }
     }
 
+    private static int? ReadSubtypeStep(object propertyObject)
+    {
+        try
+        {
+            dynamic property = propertyObject;
+            return Convert.ToInt32(property.SubTypeStep);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int MillimetersToPixels(double millimeters, int dpi)
+    {
+        return (int)Math.Round(millimeters / 25.4d * dpi, MidpointRounding.AwayFromZero);
+    }
+
     private static Exception CreateFriendlyScanException(COMException exception)
     {
         var code = unchecked((uint)exception.HResult);
@@ -499,6 +555,8 @@ public sealed class WiaScannerService
 
         return new InvalidOperationException(message, exception);
     }
+
+    private sealed record ScannerDpiCapabilities(IReadOnlyList<int> Values, bool ReportedByDriver);
 
     private static Task<T> RunStaAsync<T>(Func<T> operation)
     {

@@ -10,6 +10,8 @@ public sealed class ScanPageItem : INotifyPropertyChanged
     private int _pageNumber;
     private int _documentNumber;
     private int _pageInDocument;
+    private string _documentName = string.Empty;
+    private bool _hasCustomDocumentName;
 
     public ScanPageItem(string imagePath, BitmapSource thumbnail)
     {
@@ -65,9 +67,37 @@ public sealed class ScanPageItem : INotifyPropertyChanged
         }
     }
 
-    public string DocumentLabel => $"Документ {DocumentNumber}";
+    public string DocumentName
+    {
+        get => _documentName;
+        set
+        {
+            _hasCustomDocumentName = !string.IsNullOrWhiteSpace(value);
+            if (SetProperty(ref _documentName, value?.Trim() ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(DocumentLabel));
+            }
+        }
+    }
+
+    public string DocumentLabel => string.IsNullOrWhiteSpace(DocumentName)
+        ? $"Документ {DocumentNumber}"
+        : DocumentName;
 
     public string PageLabel => $"Страница {PageInDocument}";
+
+    public void SetDefaultDocumentName(string value)
+    {
+        if (_hasCustomDocumentName)
+        {
+            return;
+        }
+
+        if (SetProperty(ref _documentName, value))
+        {
+            OnPropertyChanged(nameof(DocumentLabel));
+        }
+    }
 
     private bool SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
     {
