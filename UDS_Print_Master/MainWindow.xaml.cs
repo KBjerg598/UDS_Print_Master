@@ -1963,18 +1963,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var displayName = string.IsNullOrWhiteSpace(printJobName)
             ? Path.GetFileName(pdfPath)
             : printJobName;
-        var progress = new Progress<PdfRenderProgress>(value =>
+        var printerName = dialog.PrintQueue?.FullName;
+        if (string.IsNullOrWhiteSpace(printerName))
         {
-            OverallStatus = $"Подготовка {displayName}: страница {value.CurrentPage} из {value.TotalPages}";
+            throw new InvalidOperationException("Не удалось определить выбранный принтер.");
+        }
+
+        var progress = new Progress<PdfPrintProgress>(value =>
+        {
+            OverallStatus = $"Печать {displayName}: страница {value.CurrentPage} из {value.TotalPages}";
         });
 
-        using var preparedDocument = await PdfPrintService.PrepareAsync(pdfPath, progress);
-        var pageSize = GetPrintablePageSize(dialog);
-        var paginator = new PreparedPdfPaginator(preparedDocument.Pages, pageSize);
+        var settings = new PdfPrintSettings(
+            printerName,
+            displayName,
+            Math.Clamp(template.Copies, 1, 99),
+            template.PageOrientation == "Landscape",
+            template.DuplexMode == "TwoSidedLongEdge");
 
         OverallStatus = $"Отправка {displayName} на принтер одним заданием...";
         await Dispatcher.Yield(DispatcherPriority.Background);
-        dialog.PrintDocument(paginator, displayName);
+        await PdfPrintService.PrintAsync(pdfPath, settings, progress);
     }
 
     private async void UpdatePreview()
@@ -2248,46 +2257,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task ConvertDocxFileToPdfAsync(string docxPath, string outputPath)
     {
-        var htmlDocument = await DocxLayoutConverter.ConvertToHtmlAsync(docxPath);
-        var htmlPath = CreateTemporaryDocxHtmlPath(docxPath);
-        var lockTaken = false;
-
-        try
-        {
-            await File.WriteAllTextAsync(htmlPath, htmlDocument.Html, Encoding.UTF8);
-            await _pdfConversionLock.WaitAsync();
-            lockTaken = true;
-
-            await ConversionPdfBrowser.EnsureCoreWebView2Async();
-            await NavigateWebViewToUriAsync(ConversionPdfBrowser, new Uri(htmlPath).AbsoluteUri);
-            await WaitForWebImagesAsync(ConversionPdfBrowser);
-
-            var coreWebView = ConversionPdfBrowser.CoreWebView2
-                              ?? throw new InvalidOperationException("Модуль преобразования DOCX в PDF не инициализирован.");
-            var printSettings = coreWebView.Environment.CreatePrintSettings();
-            ApplyDocxToPdfSettings(printSettings, htmlDocument);
-
-            var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
-            EnsurePdfWasCreated(success, outputPath);
-        }
-        finally
-        {
-            if (lockTaken)
-            {
-                try
-                {
-                    await NavigateWebViewToUriAsync(ConversionPdfBrowser, "about:blank");
-                }
-                catch
-                {
-                    // WebView2 may already be shutting down.
-                }
-
-                _pdfConversionLock.Release();
-            }
-
-            DeleteFileIfExists(htmlPath);
-        }
+        await WordInteropConverter.ConvertToPdfAsync(docxPath, outputPath);
+        EnsurePdfWasCreated(success: true, outputPath);
     }
 
     private async Task NavigateWebViewToHtmlAsync(WebView2 browser, string html)
@@ -2394,38 +2365,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         printSettings.MarginRight = MmToInches(template.MarginRight);
     }
 
-    private static void ApplyDocxToPdfSettings(CoreWebView2PrintSettings printSettings, DocxHtmlDocument document)
-    {
-        printSettings.Orientation = document.PageWidthInches > document.PageHeightInches
-            ? CoreWebView2PrintOrientation.Landscape
-            : CoreWebView2PrintOrientation.Portrait;
-        printSettings.ShouldPrintHeaderAndFooter = false;
-        printSettings.ShouldPrintBackgrounds = true;
-        printSettings.PagesPerSide = 1;
-        printSettings.ScaleFactor = 1;
-        printSettings.PageWidth = document.PageWidthInches;
-        printSettings.PageHeight = document.PageHeightInches;
-        printSettings.MarginTop = 0;
-        printSettings.MarginBottom = 0;
-        printSettings.MarginLeft = 0;
-        printSettings.MarginRight = 0;
-    }
-
     private static void EnsurePdfWasCreated(bool success, string outputPath)
     {
         if (!success || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
         {
             throw new InvalidOperationException("Не удалось создать PDF-файл.");
         }
-    }
-
-    private static string CreateTemporaryDocxHtmlPath(string sourcePath)
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "UISI Print Master", "DocxHtml");
-        Directory.CreateDirectory(folder);
-
-        var fileName = MakeSafeFileName(Path.GetFileNameWithoutExtension(sourcePath));
-        return Path.Combine(folder, $"{fileName}-{Guid.NewGuid():N}.html");
     }
 
     private string CreateTemporaryPdfPath(PrintFileItem file, string scope)
