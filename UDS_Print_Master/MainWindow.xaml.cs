@@ -128,7 +128,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DataContext = this;
 
         LoadTemplates();
-        LoadPrinters();
         Loaded += MainWindow_Loaded;
     }
 
@@ -559,6 +558,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         UpdatePreview();
+        await LoadPrintersAsync();
         await RefreshScannersAsync(loadCapabilities: false);
     }
 
@@ -601,23 +601,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SelectedTemplate = Templates.FirstOrDefault();
     }
 
-    private void LoadPrinters()
+    private async Task LoadPrintersAsync()
     {
+        var previousStatus = OverallStatus;
+        OverallStatus = "Поиск доступных принтеров...";
+
         try
         {
-            var localServer = new LocalPrintServer();
-            foreach (var queue in localServer.GetPrintQueues())
+            var result = await Task.Run(() =>
             {
-                PrinterNames.Add(queue.Name);
+                using var localServer = new LocalPrintServer();
+                var names = localServer
+                    .GetPrintQueues()
+                    .Select(queue => queue.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+                var defaultPrinterName = LocalPrintServer.GetDefaultPrintQueue()?.Name;
+                return (Names: names, DefaultPrinterName: defaultPrinterName);
+            });
+
+            PrinterNames.Clear();
+            foreach (var printerName in result.Names)
+            {
+                PrinterNames.Add(printerName);
             }
 
-            SelectedPrinterName = LocalPrintServer.GetDefaultPrintQueue()?.Name
+            SelectedPrinterName = result.DefaultPrinterName
                                   ?? PrinterNames.FirstOrDefault()
                                   ?? string.Empty;
+            OverallStatus = previousStatus;
         }
         catch
         {
-            OverallStatus = "Принтеры пока не найдены. Вы сможете выбрать принтер в стандартном окне печати.";
+            OverallStatus = "Принтеры пока не найдены. Обновите подключение и перезапустите программу.";
         }
     }
 
