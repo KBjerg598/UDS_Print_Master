@@ -1,6 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -195,30 +194,26 @@ internal sealed class PreparedPdfPaginator : DocumentPaginator
             new Uri(preparedPage.ImagePath, UriKind.Absolute),
             BitmapCreateOptions.PreservePixelFormat,
             BitmapCacheOption.OnLoad);
-        var image = new Image
-        {
-            Source = bitmap,
-            Stretch = Stretch.Uniform,
-            Width = _pageSize.Width,
-            Height = _pageSize.Height,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            SnapsToDevicePixels = true
-        };
-        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
-
-        var page = new FixedPage
-        {
-            Width = _pageSize.Width,
-            Height = _pageSize.Height,
-            Background = Brushes.White
-        };
-        page.Children.Add(image);
-        page.Measure(_pageSize);
-        page.Arrange(new Rect(_pageSize));
-        page.UpdateLayout();
-
         var pageBounds = new Rect(_pageSize);
-        return new DocumentPage(page, _pageSize, pageBounds, pageBounds);
+        var scale = Math.Min(
+            _pageSize.Width / preparedPage.Width,
+            _pageSize.Height / preparedPage.Height);
+        var renderedWidth = preparedPage.Width * scale;
+        var renderedHeight = preparedPage.Height * scale;
+        var imageBounds = new Rect(
+            (_pageSize.Width - renderedWidth) / 2,
+            (_pageSize.Height - renderedHeight) / 2,
+            renderedWidth,
+            renderedHeight);
+
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
+        using (var drawingContext = visual.RenderOpen())
+        {
+            drawingContext.DrawRectangle(Brushes.White, null, pageBounds);
+            drawingContext.DrawImage(bitmap, imageBounds);
+        }
+
+        return new DocumentPage(visual, _pageSize, pageBounds, pageBounds);
     }
 }

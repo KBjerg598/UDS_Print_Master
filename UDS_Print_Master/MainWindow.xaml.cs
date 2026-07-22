@@ -848,6 +848,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var printedCount = 0;
         var processedCount = 0;
         var errorCount = 0;
+        var printErrors = new List<string>();
 
         try
         {
@@ -886,7 +887,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 {
                     errorCount++;
                     file.Status = "Ошибка";
-                    OverallStatus = $"Не удалось напечатать {file.FileName}: {ex.Message}";
+                    var errorMessage = ex.GetBaseException().Message;
+                    printErrors.Add($"{file.FileName}: {errorMessage}");
+                    OverallStatus = $"Не удалось напечатать {file.FileName}: {errorMessage}";
                 }
 
                 processedCount++;
@@ -903,6 +906,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ? $"Готово. Отправлено в печать документов: {printedCount}."
                 : $"Готово с ошибками. Отправлено: {printedCount}, ошибок: {errorCount}.";
             UpdatePreview();
+
+            if (printErrors.Count > 0)
+            {
+                MessageBox.Show(
+                    this,
+                    $"Не удалось напечатать:\n\n{string.Join("\n", printErrors)}",
+                    "Ошибки печати",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
         }
     }
 
@@ -1856,14 +1869,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static void PrintTextFile(PrintDialog dialog, PrintFileItem file, PrintTemplate template)
     {
+        var pageSize = GetPrintablePageSize(dialog);
         var document = BuildTextDocument(
             file.FileName,
             ReadPrintableDocumentText(file),
             template,
-            Math.Max(dialog.PrintableAreaWidth, 100),
-            Math.Max(dialog.PrintableAreaHeight, 100));
+            pageSize.Width,
+            pageSize.Height);
 
         dialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, file.FileName);
+    }
+
+    private static Size GetPrintablePageSize(PrintDialog dialog)
+    {
+        static bool IsUsable(double? value)
+        {
+            return value is > 0 && double.IsFinite(value.Value);
+        }
+
+        var width = dialog.PrintableAreaWidth;
+        var height = dialog.PrintableAreaHeight;
+        if (IsUsable(width) && IsUsable(height))
+        {
+            return new Size(width, height);
+        }
+
+        var mediaWidth = dialog.PrintTicket?.PageMediaSize?.Width;
+        var mediaHeight = dialog.PrintTicket?.PageMediaSize?.Height;
+        if (IsUsable(mediaWidth) && IsUsable(mediaHeight))
+        {
+            return new Size(mediaWidth!.Value, mediaHeight!.Value);
+        }
+
+        const double a4Width = 793.7;
+        const double a4Height = 1122.5;
+        return dialog.PrintTicket?.PageOrientation == PageOrientation.Landscape
+            ? new Size(a4Height, a4Width)
+            : new Size(a4Width, a4Height);
     }
 
     private async Task PrintDocxFileAsync(PrintFileItem file, PrintDialog dialog, PrintTemplate template)
@@ -1909,9 +1951,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         });
 
         using var preparedDocument = await PdfPrintService.PrepareAsync(pdfPath, progress);
-        var pageSize = new Size(
-            Math.Max(dialog.PrintableAreaWidth, 100),
-            Math.Max(dialog.PrintableAreaHeight, 100));
+        var pageSize = GetPrintablePageSize(dialog);
         var paginator = new PreparedPdfPaginator(preparedDocument.Pages, pageSize);
 
         OverallStatus = $"Отправка {displayName} на принтер одним заданием...";
