@@ -85,8 +85,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private ScrollViewer? _previewScrollViewer;
     private bool _isPdfPreviewDragging;
     private Point _pdfPreviewDragStart;
+    private readonly SemaphoreSlim _pdfConversionLock = new(1, 1);
     private readonly HashSet<string> _temporaryPdfFiles = new(StringComparer.OrdinalIgnoreCase);
     private string? _currentPreviewPdfPath;
+    private string? _currentPreviewSourcePath;
+    private DateTime _currentPreviewSourceWriteTimeUtc;
     private readonly WiaScannerService _scannerService = new();
     private readonly PrinterWakeService _printerWakeService = new();
     private ScannerDeviceInfo? _selectedScanner;
@@ -859,7 +862,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 try
                 {
                     ApplyTemplateToPrintTicket(printDialog, template);
-                    if (IsInternalPrintFile(file))
+                    if (IsDocxFile(file))
+                    {
+                        await PrintDocxFileAsync(file, printDialog, template);
+                    }
+                    else if (IsInternalPrintFile(file))
                     {
                         PrintTextFile(printDialog, file, template);
                     }
@@ -895,6 +902,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OverallStatus = errorCount == 0
                 ? $"Готово. Отправлено в печать документов: {printedCount}."
                 : $"Готово с ошибками. Отправлено: {printedCount}, ошибок: {errorCount}.";
+            UpdatePreview();
         }
     }
 
@@ -1570,13 +1578,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             else
             {
-                navigation.TrySetException(new InvalidOperationException($"Не удалось подготовить сканы для PDF: {e.WebErrorStatus}."));
+                navigation.TrySetException(new InvalidOperationException($"Не удалось подготовить документ для PDF: {e.WebErrorStatus}."));
             }
         }
 
         browser.NavigationCompleted += OnNavigationCompleted;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var _ = timeout.Token.Register(() => navigation.TrySetException(new TimeoutException("Подготовка сканов к PDF заняла слишком много времени.")));
+        using var _ = timeout.Token.Register(() => navigation.TrySetException(new TimeoutException("Подготовка документа к PDF заняла слишком много времени.")));
 
         try
         {
@@ -1598,7 +1606,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         while (DateTime.UtcNow < deadline)
         {
             var result = await coreWebView.ExecuteScriptAsync(
-                "document.readyState === 'complete' && Array.from(document.images).every(image => image.complete && image.naturalWidth > 0)");
+                "document.readyState === 'complete' && (!document.fonts || document.fonts.status === 'loaded') && Array.from(document.images).every(image => image.complete && image.naturalWidth > 0)");
             if (string.Equals(result, "true", StringComparison.OrdinalIgnoreCase))
             {
                 return;
@@ -1607,7 +1615,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await Task.Delay(100);
         }
 
-        throw new TimeoutException("Не все страницы успели подготовиться к сохранению PDF.");
+        throw new TimeoutException("Не всё содержимое документа успело подготовиться к сохранению PDF.");
     }
 
     private void RenumberScanPages()
@@ -1771,7 +1779,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static bool IsInternalPrintFile(PrintFileItem file)
     {
-        return TextExtensions.Contains(file.Extension) || DocumentExtensions.Contains(file.Extension);
+        return TextExtensions.Contains(file.Extension)
+               || string.Equals(file.Extension, ".rtf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDocxFile(PrintFileItem file)
+    {
+        return string.Equals(file.Extension, ".docx", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsDocumentFile(PrintFileItem file)
@@ -1850,6 +1864,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Math.Max(dialog.PrintableAreaHeight, 100));
 
         dialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, file.FileName);
+    }
+
+    private async Task PrintDocxFileAsync(PrintFileItem file, PrintDialog dialog, PrintTemplate template)
+    {
+        if (TryGetCurrentDocxPreview(file, out var previewPdfPath))
+        {
+            await PrintPdfFileAsync(previewPdfPath, dialog, template);
+            return;
+        }
+
+        var temporaryPdfPath = CreateTemporaryPdfPath(file, "DocxPrint");
+
+        try
+        {
+            OverallStatus = $"Подготовка Word-документа к печати: {file.FileName}";
+            await ConvertDocxFileToPdfAsync(file.FullPath, temporaryPdfPath);
+            await PrintPdfFileAsync(temporaryPdfPath, dialog, template);
+        }
+        finally
+        {
+            ScheduleTemporaryPdfCleanup(temporaryPdfPath);
+        }
     }
 
     private async Task PrintPdfFileAsync(string pdfPath, PrintDialog dialog, PrintTemplate template)
@@ -1982,6 +2018,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 ClearPreviewPdf();
                 await ShowPdfPreviewAsync(selectedFile.FullPath, previewVersion);
+                return;
+            }
+
+            if (IsDocxFile(selectedFile))
+            {
+                if (TryGetCurrentDocxPreview(selectedFile, out var previewPdfPath))
+                {
+                    await ShowPdfPreviewAsync(previewPdfPath, previewVersion);
+                    return;
+                }
+
+                ShowPreviewMessage("Подготавливается предпросмотр Word-документа...");
+                await Task.Delay(180);
+                if (previewVersion != _previewVersion)
+                {
+                    return;
+                }
+
+                var temporaryPdfPath = CreateTemporaryPdfPath(selectedFile, "DocxPreview");
+
+                try
+                {
+                    await ConvertDocxFileToPdfAsync(selectedFile.FullPath, temporaryPdfPath);
+                    if (previewVersion != _previewVersion)
+                    {
+                        DeleteTemporaryPdf(temporaryPdfPath);
+                        return;
+                    }
+
+                    ClearPreviewPdf();
+                    _currentPreviewPdfPath = temporaryPdfPath;
+                    _currentPreviewSourcePath = selectedFile.FullPath;
+                    _currentPreviewSourceWriteTimeUtc = File.GetLastWriteTimeUtc(selectedFile.FullPath);
+                    await ShowPdfPreviewAsync(temporaryPdfPath, previewVersion);
+                }
+                catch
+                {
+                    DeleteTemporaryPdf(temporaryPdfPath);
+                    throw;
+                }
+
                 return;
             }
 
@@ -2157,20 +2234,75 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task ConvertPrintableFileToPdfAsync(PrintFileItem file, string outputPath, PrintTemplate template)
     {
+        if (IsDocxFile(file))
+        {
+            await ConvertDocxFileToPdfAsync(file.FullPath, outputPath);
+            return;
+        }
+
         var html = BuildPdfConversionHtml(file.FileName, ReadPrintableDocumentText(file), template);
 
-        await ConversionPdfBrowser.EnsureCoreWebView2Async();
-        await NavigateWebViewToHtmlAsync(ConversionPdfBrowser, html);
-
-        var coreWebView = ConversionPdfBrowser.CoreWebView2
-                          ?? throw new InvalidOperationException("PDF-конвертер WebView2 не инициализирован.");
-        var printSettings = coreWebView.Environment.CreatePrintSettings();
-        ApplyTemplateToPdfFileSettings(printSettings, template);
-
-        var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
-        if (!success || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+        await _pdfConversionLock.WaitAsync();
+        try
         {
-            throw new InvalidOperationException("Не удалось создать PDF-файл.");
+            await ConversionPdfBrowser.EnsureCoreWebView2Async();
+            await NavigateWebViewToHtmlAsync(ConversionPdfBrowser, html);
+
+            var coreWebView = ConversionPdfBrowser.CoreWebView2
+                              ?? throw new InvalidOperationException("PDF-конвертер WebView2 не инициализирован.");
+            var printSettings = coreWebView.Environment.CreatePrintSettings();
+            ApplyTemplateToPdfFileSettings(printSettings, template);
+
+            var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
+            EnsurePdfWasCreated(success, outputPath);
+        }
+        finally
+        {
+            _pdfConversionLock.Release();
+        }
+    }
+
+    private async Task ConvertDocxFileToPdfAsync(string docxPath, string outputPath)
+    {
+        var htmlDocument = await DocxLayoutConverter.ConvertToHtmlAsync(docxPath);
+        var htmlPath = CreateTemporaryDocxHtmlPath(docxPath);
+        var lockTaken = false;
+
+        try
+        {
+            await File.WriteAllTextAsync(htmlPath, htmlDocument.Html, Encoding.UTF8);
+            await _pdfConversionLock.WaitAsync();
+            lockTaken = true;
+
+            await ConversionPdfBrowser.EnsureCoreWebView2Async();
+            await NavigateWebViewToUriAsync(ConversionPdfBrowser, new Uri(htmlPath).AbsoluteUri);
+            await WaitForWebImagesAsync(ConversionPdfBrowser);
+
+            var coreWebView = ConversionPdfBrowser.CoreWebView2
+                              ?? throw new InvalidOperationException("Модуль преобразования DOCX в PDF не инициализирован.");
+            var printSettings = coreWebView.Environment.CreatePrintSettings();
+            ApplyDocxToPdfSettings(printSettings, htmlDocument);
+
+            var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
+            EnsurePdfWasCreated(success, outputPath);
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                try
+                {
+                    await NavigateWebViewToUriAsync(ConversionPdfBrowser, "about:blank");
+                }
+                catch
+                {
+                    // WebView2 may already be shutting down.
+                }
+
+                _pdfConversionLock.Release();
+            }
+
+            DeleteFileIfExists(htmlPath);
         }
     }
 
@@ -2278,6 +2410,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         printSettings.MarginRight = MmToInches(template.MarginRight);
     }
 
+    private static void ApplyDocxToPdfSettings(CoreWebView2PrintSettings printSettings, DocxHtmlDocument document)
+    {
+        printSettings.Orientation = document.PageWidthInches > document.PageHeightInches
+            ? CoreWebView2PrintOrientation.Landscape
+            : CoreWebView2PrintOrientation.Portrait;
+        printSettings.ShouldPrintHeaderAndFooter = false;
+        printSettings.ShouldPrintBackgrounds = true;
+        printSettings.PagesPerSide = 1;
+        printSettings.ScaleFactor = 1;
+        printSettings.PageWidth = document.PageWidthInches;
+        printSettings.PageHeight = document.PageHeightInches;
+        printSettings.MarginTop = 0;
+        printSettings.MarginBottom = 0;
+        printSettings.MarginLeft = 0;
+        printSettings.MarginRight = 0;
+    }
+
+    private static void EnsurePdfWasCreated(bool success, string outputPath)
+    {
+        if (!success || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+        {
+            throw new InvalidOperationException("Не удалось создать PDF-файл.");
+        }
+    }
+
+    private static string CreateTemporaryDocxHtmlPath(string sourcePath)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "UISI Print Master", "DocxHtml");
+        Directory.CreateDirectory(folder);
+
+        var fileName = MakeSafeFileName(Path.GetFileNameWithoutExtension(sourcePath));
+        return Path.Combine(folder, $"{fileName}-{Guid.NewGuid():N}.html");
+    }
+
     private string CreateTemporaryPdfPath(PrintFileItem file, string scope)
     {
         var folder = Path.Combine(Path.GetTempPath(), "UISI Print Master", scope);
@@ -2330,7 +2496,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ClearPreviewPdf()
     {
-        if (_currentPreviewPdfPath is null)
+        var previewPdfPath = _currentPreviewPdfPath;
+        _currentPreviewPdfPath = null;
+        _currentPreviewSourcePath = null;
+        _currentPreviewSourceWriteTimeUtc = default;
+
+        if (previewPdfPath is null)
         {
             return;
         }
@@ -2345,8 +2516,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // WebView2 may not be initialized yet.
         }
 
-        DeleteTemporaryPdf(_currentPreviewPdfPath);
-        _currentPreviewPdfPath = null;
+        DeleteTemporaryPdf(previewPdfPath);
+    }
+
+    private bool TryGetCurrentDocxPreview(PrintFileItem file, out string pdfPath)
+    {
+        if (_currentPreviewPdfPath is not null
+            && File.Exists(_currentPreviewPdfPath)
+            && string.Equals(_currentPreviewSourcePath, file.FullPath, StringComparison.OrdinalIgnoreCase)
+            && File.Exists(file.FullPath)
+            && File.GetLastWriteTimeUtc(file.FullPath) == _currentPreviewSourceWriteTimeUtc)
+        {
+            pdfPath = _currentPreviewPdfPath;
+            return true;
+        }
+
+        pdfPath = string.Empty;
+        return false;
     }
 
     private void DeleteTemporaryPdf(string path)
@@ -2866,7 +3052,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static string ReadPrintableDocumentText(PrintFileItem file)
     {
-        if (DocumentExtensions.Contains(file.Extension))
+        if (string.Equals(file.Extension, ".rtf", StringComparison.OrdinalIgnoreCase))
         {
             return DocumentTextReader.ReadText(file.FullPath, file.Extension);
         }

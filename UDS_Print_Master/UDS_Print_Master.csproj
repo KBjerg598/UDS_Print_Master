@@ -9,15 +9,28 @@
     <ApplicationIcon>Assets\UISI-Logo-BW.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>None</DebugType>
+  </PropertyGroup>
+
   <ItemGroup>
     <Resource Include="Assets\UISI-Logo-BW.png" />
     <Resource Include="Assets\UISI-Logo-BW.ico" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Codeuctivity.OpenXmlPowerTools" Version="10.0.579" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="MaterialDesignThemes" Version="5.3.2" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
   </ItemGroup>
+
+  <Target Name="RemoveDebugSymbolsFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
 
 </Project>
