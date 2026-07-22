@@ -16,6 +16,12 @@
     <DebugType>None</DebugType>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <AssemblyName>UISI_Print_Master.Debug</AssemblyName>
+    <OutputPath>..\artifacts\debug\bin\</OutputPath>
+    <IntermediateOutputPath>..\artifacts\debug\obj\</IntermediateOutputPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <Resource Include="Assets\UISI-Logo-BW.png" />
     <Resource Include="Assets\UISI-Logo-BW.ico" />

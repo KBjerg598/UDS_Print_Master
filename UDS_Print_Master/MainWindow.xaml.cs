@@ -982,6 +982,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         base.OnClosing(e);
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        try
+        {
+            PdfPreviewBrowser.Dispose();
+        }
+        catch
+        {
+            // The preview may already be disposed during application shutdown.
+        }
+
+        try
+        {
+            ConversionPdfBrowser.Dispose();
+        }
+        catch
+        {
+            // The converter may already be disposed during application shutdown.
+        }
+
+        base.OnClosed(e);
+    }
+
     private async void RefreshScanners_Click(object sender, RoutedEventArgs e)
     {
         await WakeScannerAndRefreshAsync();
