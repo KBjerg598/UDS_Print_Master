@@ -872,7 +872,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     }
                     else if (PdfExtensions.Contains(file.Extension))
                     {
-                        await PrintPdfFileAsync(file.FullPath, printDialog, template);
+                        await PrintPdfFileAsync(file.FullPath, printDialog, template, file.FileName);
                     }
                     else
                     {
@@ -1870,7 +1870,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (TryGetCurrentDocxPreview(file, out var previewPdfPath))
         {
-            await PrintPdfFileAsync(previewPdfPath, dialog, template);
+            await PrintPdfFileAsync(previewPdfPath, dialog, template, file.FileName);
             return;
         }
 
@@ -1880,7 +1880,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             OverallStatus = $"Подготовка Word-документа к печати: {file.FileName}";
             await ConvertDocxFileToPdfAsync(file.FullPath, temporaryPdfPath);
-            await PrintPdfFileAsync(temporaryPdfPath, dialog, template);
+            await PrintPdfFileAsync(temporaryPdfPath, dialog, template, file.FileName);
         }
         finally
         {
@@ -1888,109 +1888,35 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task PrintPdfFileAsync(string pdfPath, PrintDialog dialog, PrintTemplate template)
+    private async Task PrintPdfFileAsync(
+        string pdfPath,
+        PrintDialog dialog,
+        PrintTemplate template,
+        string? printJobName = null)
     {
         if (!File.Exists(pdfPath))
         {
             throw new FileNotFoundException("PDF-файл для печати не найден.", pdfPath);
         }
 
-        await PrintPdfWithWebViewAsync(pdfPath, dialog, template);
-    }
-
-    private async Task PrintPdfWithWebViewAsync(string pdfPath, PrintDialog dialog, PrintTemplate template)
-    {
-        StopPreviewDrag();
-        StopPdfPreviewDrag();
-        FlowPreviewHost.Visibility = Visibility.Collapsed;
-        PreviewMessageHost.Visibility = Visibility.Collapsed;
-        PdfPreviewHost.Visibility = Visibility.Visible;
-
-        await PdfPreviewBrowser.EnsureCoreWebView2Async();
-        await NavigateWebViewToFileAsync(PdfPreviewBrowser, pdfPath);
-        await WaitForPdfRenderAsync();
-
-        var coreWebView = PdfPreviewBrowser.CoreWebView2
-                          ?? throw new InvalidOperationException("PDF-принтер WebView2 не инициализирован.");
-        var printSettings = coreWebView.Environment.CreatePrintSettings();
-        ApplyTemplateToWebViewPrintSettings(printSettings, dialog, template);
-
-        var printStatus = await coreWebView.PrintAsync(printSettings);
-        if (printStatus != CoreWebView2PrintStatus.Succeeded)
+        ApplyTemplateToPrintTicket(dialog, template);
+        var displayName = string.IsNullOrWhiteSpace(printJobName)
+            ? Path.GetFileName(pdfPath)
+            : printJobName;
+        var progress = new Progress<PdfRenderProgress>(value =>
         {
-            throw new InvalidOperationException($"PDF-печать не выполнена: {GetPdfPrintStatusMessage(printStatus)}.");
-        }
-    }
+            OverallStatus = $"Подготовка {displayName}: страница {value.CurrentPage} из {value.TotalPages}";
+        });
 
-    private async Task NavigateWebViewToFileAsync(WebView2 browser, string path)
-    {
-        var coreWebView = browser.CoreWebView2
-                          ?? throw new InvalidOperationException("WebView2 не инициализирован.");
-        var navigation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var preparedDocument = await PdfPrintService.PrepareAsync(pdfPath, progress);
+        var pageSize = new Size(
+            Math.Max(dialog.PrintableAreaWidth, 100),
+            Math.Max(dialog.PrintableAreaHeight, 100));
+        var paginator = new PreparedPdfPaginator(preparedDocument.Pages, pageSize);
 
-        void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
-        {
-            if (e.IsSuccess)
-            {
-                navigation.TrySetResult();
-                return;
-            }
-
-            navigation.TrySetException(new InvalidOperationException($"Не удалось открыть PDF для печати: {e.WebErrorStatus}."));
-        }
-
-        browser.NavigationCompleted += OnNavigationCompleted;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        using var _ = timeout.Token.Register(() => navigation.TrySetException(new TimeoutException("PDF слишком долго открывался перед печатью.")));
-
-        try
-        {
-            coreWebView.Navigate(new Uri(path).AbsoluteUri);
-            await navigation.Task;
-        }
-        finally
-        {
-            browser.NavigationCompleted -= OnNavigationCompleted;
-        }
-    }
-
-    private async Task WaitForPdfRenderAsync()
-    {
-        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-        await Task.Delay(1800);
-    }
-
-    private void ApplyTemplateToWebViewPrintSettings(CoreWebView2PrintSettings printSettings, PrintDialog dialog, PrintTemplate template)
-    {
-        printSettings.PrinterName = dialog.PrintQueue?.FullName
-                                    ?? dialog.PrintQueue?.Name
-                                    ?? SelectedPrinterName;
-        printSettings.Copies = Math.Clamp(template.Copies, 1, 99);
-        printSettings.Duplex = template.DuplexMode == "TwoSidedLongEdge"
-            ? CoreWebView2PrintDuplex.TwoSidedLongEdge
-            : CoreWebView2PrintDuplex.OneSided;
-        printSettings.Orientation = template.PageOrientation == "Landscape"
-            ? CoreWebView2PrintOrientation.Landscape
-            : CoreWebView2PrintOrientation.Portrait;
-        printSettings.Collation = CoreWebView2PrintCollation.Collated;
-        printSettings.ShouldPrintHeaderAndFooter = false;
-        printSettings.ShouldPrintBackgrounds = true;
-        printSettings.PagesPerSide = 1;
-        printSettings.ScaleFactor = 1;
-        printSettings.MarginTop = 0;
-        printSettings.MarginBottom = 0;
-        printSettings.MarginLeft = 0;
-        printSettings.MarginRight = 0;
-    }
-
-    private static string GetPdfPrintStatusMessage(CoreWebView2PrintStatus status)
-    {
-        return status switch
-        {
-            CoreWebView2PrintStatus.PrinterUnavailable => "принтер недоступен",
-            CoreWebView2PrintStatus.OtherError => "ошибка WebView2 при отправке PDF на печать",
-            _ => status.ToString()
-        };
+        OverallStatus = $"Отправка {displayName} на принтер одним заданием...";
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        dialog.PrintDocument(paginator, displayName);
     }
 
     private async void UpdatePreview()
