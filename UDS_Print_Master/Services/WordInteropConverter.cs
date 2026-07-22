@@ -1,11 +1,19 @@
 using System.IO;
+using System.Printing;
 using System.Runtime.InteropServices;
 
 namespace UDS_Print_Master.Services;
 
+internal sealed record WordPrintSettings(
+    string PrinterName,
+    int Copies,
+    bool Landscape,
+    bool Duplex,
+    string? PrintToFilePath = null);
+
 internal static class WordInteropConverter
 {
-    private static readonly SemaphoreSlim ConversionLock = new(1, 1);
+    private static readonly SemaphoreSlim AutomationLock = new(1, 1);
     private const int WdAlertsNone = 0;
     private const int WdDoNotSaveChanges = 0;
     private const int WdExportFormatPdf = 17;
@@ -20,26 +28,44 @@ internal static class WordInteropConverter
         string outputPath,
         CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(sourcePath))
-        {
-            throw new FileNotFoundException("Word-документ не найден.", sourcePath);
-        }
+        EnsureSourceExists(sourcePath);
 
-        await ConversionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await AutomationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RunOnStaThreadAsync(sourcePath, outputPath, cancellationToken).ConfigureAwait(false);
+            await RunOnStaThreadAsync(
+                    () => ConvertToPdf(sourcePath, outputPath),
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
-            ConversionLock.Release();
+            AutomationLock.Release();
         }
     }
 
-    private static Task RunOnStaThreadAsync(
+    public static async Task PrintAsync(
         string sourcePath,
-        string outputPath,
-        CancellationToken cancellationToken)
+        WordPrintSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureSourceExists(sourcePath);
+
+        await AutomationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await RunOnStaThreadAsync(
+                    () => PrintDocument(sourcePath, settings),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            AutomationLock.Release();
+        }
+    }
+
+    private static Task RunOnStaThreadAsync(Action operation, CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -47,7 +73,7 @@ internal static class WordInteropConverter
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ConvertToPdf(sourcePath, outputPath);
+                operation();
                 completion.TrySetResult();
             }
             catch (OperationCanceledException ex)
@@ -61,7 +87,7 @@ internal static class WordInteropConverter
         })
         {
             IsBackground = true,
-            Name = "UISI Word PDF converter"
+            Name = "UISI Word automation"
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
@@ -69,6 +95,90 @@ internal static class WordInteropConverter
     }
 
     private static void ConvertToPdf(string sourcePath, string outputPath)
+    {
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)
+                                  ?? throw new InvalidOperationException("Не удалось определить папку временного PDF."));
+        DeleteOutputIfExists(fullOutputPath);
+
+        try
+        {
+            RunWithDocument(sourcePath, (_, document) =>
+            {
+                document.ExportAsFixedFormat(
+                    OutputFileName: fullOutputPath,
+                    ExportFormat: WdExportFormatPdf,
+                    OpenAfterExport: false,
+                    OptimizeFor: WdExportOptimizeForPrint,
+                    Range: WdExportAllDocument,
+                    Item: WdExportDocumentContent,
+                    IncludeDocProps: true,
+                    KeepIRM: true,
+                    CreateBookmarks: WdExportCreateHeadingBookmarks,
+                    DocStructureTags: true,
+                    BitmapMissingFonts: true,
+                    UseISO19005_1: false);
+            });
+
+            if (!File.Exists(fullOutputPath) || new FileInfo(fullOutputPath).Length == 0)
+            {
+                throw new InvalidOperationException("Microsoft Word не создал PDF-файл.");
+            }
+        }
+        catch
+        {
+            DeleteOutputIfExists(fullOutputPath);
+            throw;
+        }
+    }
+
+    private static void PrintDocument(string sourcePath, WordPrintSettings settings)
+    {
+        var copies = Math.Clamp(settings.Copies, 1, 99);
+        var printToFilePath = string.IsNullOrWhiteSpace(settings.PrintToFilePath)
+            ? null
+            : Path.GetFullPath(settings.PrintToFilePath);
+
+        if (printToFilePath is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(printToFilePath)
+                                      ?? throw new InvalidOperationException("Не удалось определить папку файла печати."));
+            DeleteOutputIfExists(printToFilePath);
+        }
+
+        using var printerPreferences = PrinterPreferenceScope.Apply(settings);
+        RunWithDocument(sourcePath, (word, document) =>
+        {
+            SelectWordPrinter(word, settings.PrinterName);
+            document.Activate();
+
+            if (printToFilePath is null)
+            {
+                document.PrintOut(
+                    Background: false,
+                    Copies: copies,
+                    PrintToFile: false,
+                    Collate: true);
+            }
+            else
+            {
+                document.PrintOut(
+                    Background: false,
+                    OutputFileName: printToFilePath,
+                    Copies: copies,
+                    PrintToFile: true,
+                    Collate: true);
+            }
+        });
+
+        if (printToFilePath is not null &&
+            (!File.Exists(printToFilePath) || new FileInfo(printToFilePath).Length == 0))
+        {
+            throw new InvalidOperationException("Microsoft Word не создал файл печати.");
+        }
+    }
+
+    private static void RunWithDocument(string sourcePath, Action<dynamic, dynamic> operation)
     {
         var wordType = Type.GetTypeFromProgID("Word.Application")
                        ?? throw new InvalidOperationException(
@@ -79,10 +189,6 @@ internal static class WordInteropConverter
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)
-                                      ?? throw new InvalidOperationException("Не удалось определить папку временного PDF."));
-            DeleteOutputIfExists(outputPath);
-
             wordObject = Activator.CreateInstance(wordType)
                          ?? throw new InvalidOperationException("Не удалось запустить Microsoft Word.");
             dynamic word = wordObject;
@@ -102,37 +208,14 @@ internal static class WordInteropConverter
                 Visible: false,
                 OpenAndRepair: true,
                 NoEncodingDialog: true);
-            dynamic document = documentObject;
-            document.ExportAsFixedFormat(
-                OutputFileName: Path.GetFullPath(outputPath),
-                ExportFormat: WdExportFormatPdf,
-                OpenAfterExport: false,
-                OptimizeFor: WdExportOptimizeForPrint,
-                Range: WdExportAllDocument,
-                Item: WdExportDocumentContent,
-                IncludeDocProps: true,
-                KeepIRM: true,
-                CreateBookmarks: WdExportCreateHeadingBookmarks,
-                DocStructureTags: true,
-                BitmapMissingFonts: true,
-                UseISO19005_1: false);
 
-            if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
-            {
-                throw new InvalidOperationException("Microsoft Word не создал PDF-файл.");
-            }
+            operation(word, (dynamic)documentObject);
         }
         catch (COMException ex)
         {
-            DeleteOutputIfExists(outputPath);
             throw new InvalidOperationException(
-                $"Microsoft Word не смог преобразовать документ: {ex.Message}",
+                $"Microsoft Word не смог обработать документ: {ex.Message}",
                 ex);
-        }
-        catch
-        {
-            DeleteOutputIfExists(outputPath);
-            throw;
         }
         finally
         {
@@ -164,6 +247,36 @@ internal static class WordInteropConverter
         }
     }
 
+    private static void SelectWordPrinter(dynamic word, string printerName)
+    {
+        var activePrinter = Convert.ToString(word.ActivePrinter) ?? string.Empty;
+        if (activePrinter.StartsWith(printerName, StringComparison.CurrentCultureIgnoreCase))
+        {
+            return;
+        }
+
+        object? wordBasicObject = null;
+        try
+        {
+            wordBasicObject = word.WordBasic;
+            ((dynamic)wordBasicObject).FilePrintSetup(
+                Printer: printerName,
+                DoNotSetAsSysDefault: 1);
+        }
+        finally
+        {
+            ReleaseComObject(wordBasicObject);
+        }
+    }
+
+    private static void EnsureSourceExists(string sourcePath)
+    {
+        if (!File.Exists(sourcePath))
+        {
+            throw new FileNotFoundException("Word-документ не найден.", sourcePath);
+        }
+    }
+
     private static void DeleteOutputIfExists(string outputPath)
     {
         if (File.Exists(outputPath))
@@ -177,6 +290,104 @@ internal static class WordInteropConverter
         if (value is not null && Marshal.IsComObject(value))
         {
             Marshal.FinalReleaseComObject(value);
+        }
+    }
+
+    private sealed class PrinterPreferenceScope : IDisposable
+    {
+        private readonly LocalPrintServer _server;
+        private readonly PrintQueue _queue;
+        private readonly PrintTicket _originalTicket;
+        private bool _restoreRequired;
+
+        private PrinterPreferenceScope(
+            LocalPrintServer server,
+            PrintQueue queue,
+            PrintTicket originalTicket)
+        {
+            _server = server;
+            _queue = queue;
+            _originalTicket = originalTicket;
+        }
+
+        public static PrinterPreferenceScope Apply(WordPrintSettings settings)
+        {
+            var server = new LocalPrintServer();
+            PrintQueue? queue = null;
+            PrintTicket originalTicket;
+
+            try
+            {
+                queue = server.GetPrintQueue(settings.PrinterName);
+                queue.Refresh();
+                originalTicket = CloneTicket(queue.UserPrintTicket ?? queue.DefaultPrintTicket);
+            }
+            catch
+            {
+                queue?.Dispose();
+                server.Dispose();
+                throw;
+            }
+
+            var scope = new PrinterPreferenceScope(server, queue, originalTicket);
+            try
+            {
+                var deltaTicket = new PrintTicket
+                {
+                    CopyCount = 1,
+                    PageOrientation = settings.Landscape
+                        ? PageOrientation.Landscape
+                        : PageOrientation.Portrait,
+                    Duplexing = settings.Duplex
+                        ? Duplexing.TwoSidedLongEdge
+                        : Duplexing.OneSided
+                };
+                var validatedTicket = queue
+                    .MergeAndValidatePrintTicket(originalTicket, deltaTicket)
+                    .ValidatedPrintTicket;
+
+                if (settings.Duplex && validatedTicket.Duplexing != Duplexing.TwoSidedLongEdge)
+                {
+                    throw new InvalidOperationException(
+                        "Выбранный принтер не поддерживает автоматическую двустороннюю печать с переворотом по длинному краю.");
+                }
+
+                scope._restoreRequired = true;
+                queue.UserPrintTicket = validatedTicket;
+                queue.Commit();
+                return scope;
+            }
+            catch
+            {
+                scope.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (_restoreRequired)
+                {
+                    _queue.UserPrintTicket = CloneTicket(_originalTicket);
+                    _queue.Commit();
+                    _restoreRequired = false;
+                }
+            }
+            finally
+            {
+                _queue.Dispose();
+                _server.Dispose();
+            }
+        }
+
+        private static PrintTicket CloneTicket(PrintTicket ticket)
+        {
+            using var stream = new MemoryStream();
+            ticket.SaveTo(stream);
+            stream.Position = 0;
+            return new PrintTicket(stream);
         }
     }
 }

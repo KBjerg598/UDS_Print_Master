@@ -1951,24 +1951,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task PrintDocxFileAsync(PrintFileItem file, PrintDialog dialog, PrintTemplate template)
     {
-        if (TryGetCurrentDocxPreview(file, out var previewPdfPath))
+        ApplyTemplateToPrintTicket(dialog, template);
+        var printerName = dialog.PrintQueue?.Name;
+        if (string.IsNullOrWhiteSpace(printerName))
         {
-            await PrintPdfFileAsync(previewPdfPath, dialog, template, file.FileName);
-            return;
+            throw new InvalidOperationException("Не удалось определить выбранный принтер.");
         }
 
-        var temporaryPdfPath = CreateTemporaryPdfPath(file, "DocxPrint");
+        var settings = new WordPrintSettings(
+            printerName,
+            Math.Clamp(template.Copies, 1, 99),
+            template.PageOrientation == "Landscape",
+            template.DuplexMode == "TwoSidedLongEdge");
 
-        try
-        {
-            OverallStatus = $"Подготовка Word-документа к печати: {file.FileName}";
-            await ConvertDocxFileToPdfAsync(file.FullPath, temporaryPdfPath);
-            await PrintPdfFileAsync(temporaryPdfPath, dialog, template, file.FileName);
-        }
-        finally
-        {
-            ScheduleTemporaryPdfCleanup(temporaryPdfPath);
-        }
+        OverallStatus = $"Microsoft Word отправляет {file.FileName} одним заданием...";
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        await WordInteropConverter.PrintAsync(file.FullPath, settings);
     }
 
     private async Task PrintPdfFileAsync(
