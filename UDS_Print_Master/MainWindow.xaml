@@ -159,7 +159,7 @@
 
         <Grid Grid.Row="1" Margin="0,16,0,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="360" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="390" />
             </Grid.ColumnDefinitions>
@@ -173,10 +173,31 @@
                 <Grid>
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
-                              Padding="0,0,6,0">
-                    <StackPanel>
+                              Padding="0">
+                    <StackPanel Margin="0,0,18,10">
                         <TextBlock Text="Параметры печати"
                                    Style="{StaticResource PanelTitle}" />
+
+                        <Border Background="{StaticResource AppSoftBlueBrush}"
+                                BorderBrush="#C7D7FE"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12,9"
+                                Margin="0,0,0,8">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="TuneVariant"
+                                                         Width="19"
+                                                         Height="19"
+                                                         Foreground="#1D4ED8"
+                                                         Margin="0,0,8,0"
+                                                         VerticalAlignment="Center" />
+                                <TextBlock Text="Для всех файлов в очереди"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="#1D4ED8"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
 
                         <ComboBox ItemsSource="{Binding PrinterNames}"
                                   SelectedItem="{Binding SelectedPrinterName, Mode=TwoWay}"
@@ -211,11 +232,14 @@
                             <ComboBoxItem Content="Чёрно-белая" Tag="Monochrome" />
                         </ComboBox>
 
-                        <Separator Margin="0,16,0,12" />
+                        <Separator Margin="0,20,0,14" />
 
-                        <TextBlock Text="Страницы"
-                                   FontSize="13"
+                        <TextBlock Text="Диапазон страниц"
+                                   FontSize="14"
                                    FontWeight="SemiBold"
+                                   Margin="0,0,0,2" />
+                        <TextBlock Text="Применяется отдельно к каждому файлу"
+                                   Style="{StaticResource SmallMutedText}"
                                    Margin="0,0,0,4" />
 
                         <ComboBox SelectedValue="{Binding PrintSettings.PageRangeMode, Mode=TwoWay}"
@@ -242,17 +266,40 @@
                                      materialDesign:HintAssist.Hint="По страницу" />
                         </Grid>
 
-                        <ComboBox SelectedValue="{Binding PrintSettings.PdfPageSizing, Mode=TwoWay}"
-                                  SelectedValuePath="Tag"
-                                  Style="{StaticResource SettingsComboBox}"
-                                  materialDesign:HintAssist.Hint="Размер страницы PDF">
-                            <ComboBoxItem Content="Вписать в область печати" Tag="Fit" />
-                            <ComboBoxItem Content="Фактический размер" Tag="ActualSize" />
-                        </ComboBox>
+                        <Expander Margin="0,18,0,0"
+                                  IsExpanded="False">
+                            <Expander.Header>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon Kind="FilePdfBox"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Foreground="#B91C1C"
+                                                                 Margin="0,0,8,0"
+                                                                 VerticalAlignment="Center" />
+                                        <TextBlock Text="Дополнительно для PDF"
+                                                   FontSize="14"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock Text="Только для PDF-файлов"
+                                               Style="{StaticResource SmallMutedText}"
+                                               Margin="28,2,0,0" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <ComboBox SelectedValue="{Binding PrintSettings.PdfPageSizing, Mode=TwoWay}"
+                                      SelectedValuePath="Tag"
+                                      Style="{StaticResource SettingsComboBox}"
+                                      materialDesign:HintAssist.Hint="Масштаб PDF"
+                                      Margin="0,12,0,2">
+                                <ComboBoxItem Content="Вписать в область печати" Tag="Fit" />
+                                <ComboBoxItem Content="Фактический размер" Tag="ActualSize" />
+                            </ComboBox>
+                        </Expander>
 
                         <Button Style="{StaticResource MaterialDesignOutlinedButton}"
                                 Click="ResetPrintSettings_Click"
-                                Margin="0,18,0,0"
+                                Margin="0,22,0,0"
                                 HorizontalAlignment="Stretch">
                             <StackPanel Orientation="Horizontal"
                                         HorizontalAlignment="Center">
