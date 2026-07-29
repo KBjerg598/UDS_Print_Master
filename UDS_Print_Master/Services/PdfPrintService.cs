@@ -11,7 +11,11 @@ internal sealed record PdfPrintSettings(
     string JobName,
     int Copies,
     bool Landscape,
-    bool Duplex);
+    bool Duplex,
+    bool Color,
+    int? FromPage,
+    int? ToPage,
+    bool ActualSize);
 
 internal static class PdfPrintService
 {
@@ -38,7 +42,13 @@ internal static class PdfPrintService
             throw new FileNotFoundException("PDF-файл для печати не найден.", pdfPath);
         }
 
-        using var document = new PdfiumPrintDocument(pdfPath, progress, cancellationToken)
+        using var document = new PdfiumPrintDocument(
+            pdfPath,
+            settings.FromPage,
+            settings.ToPage,
+            settings.ActualSize,
+            progress,
+            cancellationToken)
         {
             DocumentName = settings.JobName,
             OriginAtMargins = false,
@@ -62,6 +72,7 @@ internal static class PdfPrintService
             ? Duplex.Vertical
             : Duplex.Simplex;
         document.DefaultPageSettings.Landscape = settings.Landscape;
+        document.DefaultPageSettings.Color = settings.Color;
         document.Print();
     }
 }
@@ -70,11 +81,17 @@ internal sealed class PdfiumPrintDocument : PrintDocument
 {
     private readonly IProgress<PdfPrintProgress>? _progress;
     private readonly CancellationToken _cancellationToken;
+    private readonly int _firstPageIndex;
+    private readonly int _lastPageIndex;
+    private readonly bool _actualSize;
     private IntPtr _document;
     private int _pageIndex;
 
     public PdfiumPrintDocument(
         string pdfPath,
+        int? fromPage,
+        int? toPage,
+        bool actualSize,
         IProgress<PdfPrintProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -93,6 +110,18 @@ internal sealed class PdfiumPrintDocument : PrintDocument
             throw new InvalidOperationException("PDF-файл не содержит страниц.");
         }
 
+        var firstPage = fromPage ?? 1;
+        if (firstPage > PageCount)
+        {
+            PdfiumNative.FPDF_CloseDocument(_document);
+            _document = IntPtr.Zero;
+            throw new InvalidOperationException(
+                $"PDF содержит только {PageCount} стр.");
+        }
+
+        _firstPageIndex = firstPage - 1;
+        _lastPageIndex = Math.Min(toPage ?? PageCount, PageCount) - 1;
+        _actualSize = actualSize;
         _progress = progress;
         _cancellationToken = cancellationToken;
     }
@@ -101,7 +130,7 @@ internal sealed class PdfiumPrintDocument : PrintDocument
 
     protected override void OnBeginPrint(PrintEventArgs e)
     {
-        _pageIndex = 0;
+        _pageIndex = _firstPageIndex;
         _cancellationToken.ThrowIfCancellationRequested();
         base.OnBeginPrint(e);
     }
@@ -117,7 +146,7 @@ internal sealed class PdfiumPrintDocument : PrintDocument
 
         try
         {
-            RenderPage(e, page);
+            RenderPage(e, page, _actualSize);
         }
         finally
         {
@@ -126,7 +155,7 @@ internal sealed class PdfiumPrintDocument : PrintDocument
 
         _pageIndex++;
         _progress?.Report(new PdfPrintProgress(_pageIndex, PageCount));
-        e.HasMorePages = _pageIndex < PageCount;
+        e.HasMorePages = _pageIndex <= _lastPageIndex;
         base.OnPrintPage(e);
     }
 
@@ -141,7 +170,7 @@ internal sealed class PdfiumPrintDocument : PrintDocument
         base.Dispose(disposing);
     }
 
-    private static void RenderPage(PrintPageEventArgs e, IntPtr page)
+    private static void RenderPage(PrintPageEventArgs e, IntPtr page, bool actualSize)
     {
         var graphics = e.Graphics
                        ?? throw new InvalidOperationException("Драйвер принтера не предоставил поверхность печати.");
@@ -170,6 +199,20 @@ internal sealed class PdfiumPrintDocument : PrintDocument
             var scale = Math.Min(targetWidth / rotatedWidth, targetHeight / rotatedHeight);
             var renderWidth = Math.Max(1, (int)Math.Round(rotatedWidth * scale));
             var renderHeight = Math.Max(1, (int)Math.Round(rotatedHeight * scale));
+            if (actualSize)
+            {
+                var dpiX = PdfiumNative.GetDeviceCaps(hdc, PdfiumNative.LogPixelsX);
+                var dpiY = PdfiumNative.GetDeviceCaps(hdc, PdfiumNative.LogPixelsY);
+                if (dpiX > 0 && dpiY > 0)
+                {
+                    renderWidth = Math.Max(
+                        1,
+                        (int)Math.Round(rotatedWidth * dpiX / 72d));
+                    renderHeight = Math.Max(
+                        1,
+                        (int)Math.Round(rotatedHeight * dpiY / 72d));
+                }
+            }
             var renderX = (targetWidth - renderWidth) / 2;
             var renderY = (targetHeight - renderHeight) / 2;
 
@@ -194,6 +237,8 @@ internal static class PdfiumNative
 {
     internal const int HorzRes = 8;
     internal const int VertRes = 10;
+    internal const int LogPixelsX = 88;
+    internal const int LogPixelsY = 90;
     internal const int PrintingFlags = RenderAnnotations | RenderForPrinting;
     private const int PdfPrintModeEmf = 0;
     private const int RenderAnnotations = 0x01;

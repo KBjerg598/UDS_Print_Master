@@ -6,8 +6,6 @@ namespace UDS_Print_Master.Models;
 
 public sealed class PrintFileItem : INotifyPropertyChanged
 {
-    private string _assignedTemplateId = string.Empty;
-    private string _templateName = "Не назначен";
     private string _status = "Ожидает";
 
     public PrintFileItem(string fullPath)
@@ -28,28 +26,10 @@ public sealed class PrintFileItem : INotifyPropertyChanged
 
     public string SizeLabel { get; }
 
-    public string AssignedTemplateId
-    {
-        get => _assignedTemplateId;
-        set => SetProperty(ref _assignedTemplateId, value);
-    }
-
-    public string TemplateName
-    {
-        get => _templateName;
-        set => SetProperty(ref _templateName, value);
-    }
-
     public string Status
     {
         get => _status;
         set => SetProperty(ref _status, value);
-    }
-
-    public void AssignTemplate(PrintTemplate template)
-    {
-        AssignedTemplateId = template.Id;
-        TemplateName = template.Name;
     }
 
     private static string FormatSize(long bytes)

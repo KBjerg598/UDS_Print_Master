@@ -164,62 +164,38 @@
                 <ColumnDefinition Width="390" />
             </Grid.ColumnDefinitions>
 
-            <materialDesign:Card x:Name="TemplatesPanel"
+            <materialDesign:Card x:Name="PrintSettingsPanel"
                                  Grid.Column="0"
                                  Padding="20"
                                  Background="{StaticResource AppSurfaceBrush}"
                                  materialDesign:ElevationAssist.Elevation="Dp2"
                                  Margin="0,0,16,0">
+                <Grid>
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               Padding="0,0,6,0">
                     <StackPanel>
-                        <TextBlock Text="Шаблоны печати" Style="{StaticResource PanelTitle}" />
+                        <TextBlock Text="Параметры печати"
+                                   Style="{StaticResource PanelTitle}" />
 
-                        <ComboBox ItemsSource="{Binding Templates}"
-                                  DisplayMemberPath="Name"
-                                  SelectedItem="{Binding SelectedTemplate, Mode=TwoWay}"
+                        <ComboBox ItemsSource="{Binding PrinterNames}"
+                                  SelectedItem="{Binding SelectedPrinterName, Mode=TwoWay}"
                                   Style="{StaticResource SettingsComboBox}"
-                                  materialDesign:HintAssist.Hint="Активный шаблон" />
+                                  materialDesign:HintAssist.Hint="Принтер" />
 
-                        <UniformGrid Columns="3" Margin="0,12,0,4">
-                            <Button Style="{StaticResource MaterialDesignFlatButton}"
-                                    Click="NewTemplate_Click"
-                                    ToolTip="Новый шаблон"
-                                    Margin="0,0,6,0">
-                                <materialDesign:PackIcon Kind="Plus" Width="22" Height="22" />
-                            </Button>
-                            <Button Style="{StaticResource MaterialDesignFlatButton}"
-                                    Click="DuplicateTemplate_Click"
-                                    ToolTip="Создать копию"
-                                    Margin="0,0,6,0">
-                                <materialDesign:PackIcon Kind="ContentCopy" Width="20" Height="20" />
-                            </Button>
-                            <Button Style="{StaticResource MaterialDesignFlatButton}"
-                                    Click="DeleteTemplate_Click"
-                                    ToolTip="Удалить шаблон"
-                                    Foreground="#B91C1C">
-                                <materialDesign:PackIcon Kind="Delete" Width="21" Height="21" />
-                            </Button>
-                        </UniformGrid>
-
-                        <TextBox Text="{Binding SelectedTemplate.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Text="{Binding PrintSettings.Copies, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource SettingsTextBox}"
-                                 materialDesign:HintAssist.Hint="Название шаблона" />
+                                 materialDesign:HintAssist.Hint="Количество копий" />
 
-                        <TextBox Text="{Binding SelectedTemplate.Copies, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Style="{StaticResource SettingsTextBox}"
-                                 materialDesign:HintAssist.Hint="Копий каждого файла" />
-
-                        <ComboBox SelectedValue="{Binding SelectedTemplate.PageOrientation, Mode=TwoWay}"
+                        <ComboBox SelectedValue="{Binding PrintSettings.PageOrientation, Mode=TwoWay}"
                                   SelectedValuePath="Tag"
                                   Style="{StaticResource SettingsComboBox}"
-                                  materialDesign:HintAssist.Hint="Ориентация листа">
+                                  materialDesign:HintAssist.Hint="Ориентация">
                             <ComboBoxItem Content="Книжная" Tag="Portrait" />
                             <ComboBoxItem Content="Альбомная" Tag="Landscape" />
                         </ComboBox>
 
-                        <ComboBox SelectedValue="{Binding SelectedTemplate.DuplexMode, Mode=TwoWay}"
+                        <ComboBox SelectedValue="{Binding PrintSettings.DuplexMode, Mode=TwoWay}"
                                   SelectedValuePath="Tag"
                                   Style="{StaticResource SettingsComboBox}"
                                   materialDesign:HintAssist.Hint="Режим печати">
@@ -227,46 +203,69 @@
                             <ComboBoxItem Content="Двусторонняя" Tag="TwoSidedLongEdge" />
                         </ComboBox>
 
-                        <Border BorderBrush="{StaticResource AppLineBrush}"
-                                BorderThickness="1"
-                                Background="#F8FAFC"
-                                CornerRadius="14"
-                                Padding="14"
-                                Margin="0,18,0,0">
-                            <StackPanel>
-                                <CheckBox Content="Расширенные настройки"
-                                          IsChecked="{Binding IsAdvancedSettingsEnabled, Mode=TwoWay}"
-                                          Style="{StaticResource MaterialDesignCheckBox}" />
-                                <Button Style="{StaticResource MaterialDesignOutlinedButton}"
-                                        Click="OpenTemplateSettings_Click"
-                                        IsEnabled="{Binding IsAdvancedSettingsEnabled}"
-                                        Margin="0,14,0,0"
-                                        Padding="14,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="Tune"
-                                                                 Width="20"
-                                                                 Height="20"
-                                                                 Margin="0,0,8,0" />
-                                        <TextBlock Text="Детальный шаблон" />
-                                    </StackPanel>
-                                </Button>
-                            </StackPanel>
-                        </Border>
+                        <ComboBox SelectedValue="{Binding PrintSettings.ColorMode, Mode=TwoWay}"
+                                  SelectedValuePath="Tag"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  materialDesign:HintAssist.Hint="Цвет">
+                            <ComboBoxItem Content="Цветная" Tag="Color" />
+                            <ComboBoxItem Content="Чёрно-белая" Tag="Monochrome" />
+                        </ComboBox>
 
-                        <Button Style="{StaticResource MaterialDesignFlatButton}"
-                                Click="SaveTemplates_Click"
-                                Margin="0,16,0,0"
+                        <Separator Margin="0,16,0,12" />
+
+                        <TextBlock Text="Страницы"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,4" />
+
+                        <ComboBox SelectedValue="{Binding PrintSettings.PageRangeMode, Mode=TwoWay}"
+                                  SelectedValuePath="Tag"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  materialDesign:HintAssist.Hint="Диапазон">
+                            <ComboBoxItem Content="Все страницы" Tag="All" />
+                            <ComboBoxItem Content="Указанный диапазон" Tag="Custom" />
+                        </ComboBox>
+
+                        <Grid IsEnabled="{Binding PrintSettings.IsCustomPageRange}"
+                              Margin="0,2,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding PrintSettings.FromPage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsTextBox}"
+                                     materialDesign:HintAssist.Hint="С страницы" />
+                            <TextBox Grid.Column="2"
+                                     Text="{Binding PrintSettings.ToPage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsTextBox}"
+                                     materialDesign:HintAssist.Hint="По страницу" />
+                        </Grid>
+
+                        <ComboBox SelectedValue="{Binding PrintSettings.PdfPageSizing, Mode=TwoWay}"
+                                  SelectedValuePath="Tag"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  materialDesign:HintAssist.Hint="Размер страницы PDF">
+                            <ComboBoxItem Content="Вписать в область печати" Tag="Fit" />
+                            <ComboBoxItem Content="Фактический размер" Tag="ActualSize" />
+                        </ComboBox>
+
+                        <Button Style="{StaticResource MaterialDesignOutlinedButton}"
+                                Click="ResetPrintSettings_Click"
+                                Margin="0,18,0,0"
                                 HorizontalAlignment="Stretch">
-                            <StackPanel Orientation="Horizontal">
-                                <materialDesign:PackIcon Kind="ContentSave"
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Center">
+                                <materialDesign:PackIcon Kind="Restore"
                                                          Width="20"
                                                          Height="20"
                                                          Margin="0,0,8,0" />
-                                <TextBlock Text="Сохранить шаблоны" />
+                                <TextBlock Text="Сбросить параметры" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
                 </ScrollViewer>
+                </Grid>
             </materialDesign:Card>
 
             <materialDesign:Card x:Name="WorkspacePanel"
@@ -285,7 +284,6 @@
                     <TabItem Header="Очередь печати">
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
@@ -338,44 +336,7 @@
                         </WrapPanel>
                     </Grid>
 
-                    <Border Grid.Row="1"
-                            BorderBrush="{StaticResource AppLineBrush}"
-                            BorderThickness="1"
-                            Background="#F8FAFC"
-                            CornerRadius="14"
-                            Padding="14"
-                            Margin="0,14,0,12">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <CheckBox Content="Печатать все файлы по активному шаблону"
-                                          IsChecked="{Binding UseOneTemplateForAll, Mode=TwoWay}"
-                                          Style="{StaticResource MaterialDesignCheckBox}" />
-                                <TextBlock Text="Если выключить, каждый файл будет печататься по назначенному ему шаблону."
-                                           Style="{StaticResource SmallMutedText}"
-                                           Margin="0,5,12,0" />
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Style="{StaticResource MaterialDesignOutlinedButton}"
-                                    Click="ApplyTemplateToSelected_Click"
-                                    Margin="12,0,0,0"
-                                    VerticalAlignment="Center"
-                                    Padding="12,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <materialDesign:PackIcon Kind="PlaylistCheck"
-                                                             Width="20"
-                                                             Height="20"
-                                                             Margin="0,0,7,0" />
-                                    <TextBlock Text="Назначить выбранным" />
-                                </StackPanel>
-                            </Button>
-                        </Grid>
-                    </Border>
-
-                    <DataGrid Grid.Row="2"
+                    <DataGrid Grid.Row="1"
                               x:Name="FilesGrid"
                               ItemsSource="{Binding Files}"
                               AutoGenerateColumns="False"
@@ -403,16 +364,13 @@
                             <DataGridTextColumn Header="Размер"
                                                 Binding="{Binding SizeLabel}"
                                                 Width="0.75*" />
-                            <DataGridTextColumn Header="Шаблон"
-                                                Binding="{Binding TemplateName}"
-                                                Width="1.35*" />
                             <DataGridTextColumn Header="Статус"
                                                 Binding="{Binding Status}"
                                                 Width="1*" />
                         </DataGrid.Columns>
                     </DataGrid>
 
-                    <Border Grid.Row="3"
+                    <Border Grid.Row="2"
                             BorderBrush="{StaticResource AppLineBrush}"
                             BorderThickness="1"
                             Background="#F8FAFC"
@@ -1060,7 +1018,8 @@
                               SelectedItem="{Binding SelectedPrinterName, Mode=TwoWay}"
                               Style="{StaticResource SettingsComboBox}"
                               materialDesign:HintAssist.Hint="Принтер"
-                              Margin="0,0,0,12" />
+                              Margin="0,0,0,12"
+                              Visibility="Collapsed" />
 
                     <Border Grid.Row="2"
                             Background="{StaticResource AppSoftBlueBrush}"

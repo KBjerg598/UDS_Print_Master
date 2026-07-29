@@ -66,17 +66,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         '\u0448', '\u0449', '\u044A', '\u044B', '\u044C', '\u044D', '\u044E', '\u044F'
     ];
 
-    private PrintTemplate? _selectedTemplate;
+    private PrintSettings _printSettings = new();
     private string _selectedPrinterName = string.Empty;
     private string _currentPrintingFile = "Очередь не запущена";
-    private string _overallStatus = "Добавьте файлы и выберите шаблон печати.";
+    private string _overallStatus = "Добавьте файлы и выберите принтер.";
     private string _conversionStatus = "Готово к конвертации.";
     private double _progressValue;
     private double _conversionProgressValue;
     private bool _isPrinting;
     private bool _isConverting;
-    private bool _useOneTemplateForAll = true;
-    private bool _isAdvancedSettingsEnabled;
     private int _previewVersion;
     private bool _isPreviewDragging;
     private Point _previewDragStart;
@@ -125,9 +123,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Files.CollectionChanged += Files_CollectionChanged;
         ConversionFiles.CollectionChanged += ConversionFiles_CollectionChanged;
         ScanPages.CollectionChanged += ScanPages_CollectionChanged;
+        PrintSettings = PrintSettingsStore.Load();
         DataContext = this;
 
-        LoadTemplates();
         Loaded += MainWindow_Loaded;
     }
 
@@ -137,8 +135,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<PrintFileItem> ConversionFiles { get; } = [];
 
-    public ObservableCollection<PrintTemplate> Templates { get; } = [];
-
     public ObservableCollection<string> PrinterNames { get; } = [];
 
     public ObservableCollection<ScannerDeviceInfo> Scanners { get; } = [];
@@ -147,39 +143,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<ScanPageItem> ScanPages { get; } = [];
 
-    public ObservableCollection<string> FontFamilies { get; } =
-    [
-        "Segoe UI",
-        "Arial",
-        "Calibri",
-        "Consolas",
-        "Courier New",
-        "Times New Roman",
-        "Verdana",
-        "Tahoma"
-    ];
-
-    public PrintTemplate? SelectedTemplate
+    public PrintSettings PrintSettings
     {
-        get => _selectedTemplate;
+        get => _printSettings;
         set
         {
-            if (_selectedTemplate == value)
+            if (ReferenceEquals(_printSettings, value))
             {
                 return;
             }
 
-            if (_selectedTemplate is not null)
-            {
-                _selectedTemplate.PropertyChanged -= SelectedTemplate_PropertyChanged;
-            }
-
-            _selectedTemplate = value;
-
-            if (_selectedTemplate is not null)
-            {
-                _selectedTemplate.PropertyChanged += SelectedTemplate_PropertyChanged;
-            }
+            _printSettings.PropertyChanged -= PrintSettings_PropertyChanged;
+            _printSettings = value;
+            _printSettings.PropertyChanged += PrintSettings_PropertyChanged;
 
             OnPropertyChanged();
             if (IsLoaded)
@@ -229,18 +205,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         get => _conversionProgressValue;
         set => SetProperty(ref _conversionProgressValue, value);
-    }
-
-    public bool UseOneTemplateForAll
-    {
-        get => _useOneTemplateForAll;
-        set => SetProperty(ref _useOneTemplateForAll, value);
-    }
-
-    public bool IsAdvancedSettingsEnabled
-    {
-        get => _isAdvancedSettingsEnabled;
-        set => SetProperty(ref _isAdvancedSettingsEnabled, value);
     }
 
     public ScannerDeviceInfo? SelectedScanner
@@ -564,13 +528,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void MainWorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (e.Source != MainWorkspaceTabs || TemplatesPanel is null || WorkspacePanel is null || PrintPreviewPanel is null)
+        if (e.Source != MainWorkspaceTabs || PrintSettingsPanel is null || WorkspacePanel is null || PrintPreviewPanel is null)
         {
             return;
         }
 
         var scanningWorkspace = MainWorkspaceTabs.SelectedIndex == 2;
-        TemplatesPanel.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
+        PrintSettingsPanel.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
         PrintPreviewPanel.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
         PrintQueueButton.Visibility = scanningWorkspace ? Visibility.Collapsed : Visibility.Visible;
 
@@ -587,18 +551,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _scannerWakeCancellation?.Cancel();
             IsScanPreviewExpanded = false;
         }
-    }
-
-    private void LoadTemplates()
-    {
-        Templates.Clear();
-        foreach (var template in TemplateStore.Load())
-        {
-            NormalizeTemplate(template);
-            Templates.Add(template);
-        }
-
-        SelectedTemplate = Templates.FirstOrDefault();
     }
 
     private async Task LoadPrintersAsync()
@@ -720,111 +672,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdatePreview();
     }
 
-    private void ApplyTemplateToSelected_Click(object sender, RoutedEventArgs e)
+    private void ResetPrintSettings_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedTemplate is null)
-        {
-            return;
-        }
-
-        var selectedFiles = FilesGrid.SelectedItems.Cast<PrintFileItem>().ToList();
-        if (selectedFiles.Count == 0)
-        {
-            MessageBox.Show(this, "Выберите один или несколько документов в списке.", "Назначение шаблона", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        foreach (var file in selectedFiles)
-        {
-            file.AssignTemplate(SelectedTemplate);
-        }
-
-        OverallStatus = $"Шаблон \"{SelectedTemplate.Name}\" назначен выбранным документам.";
-        UpdatePreview();
-    }
-
-    private void NewTemplate_Click(object sender, RoutedEventArgs e)
-    {
-        var template = new PrintTemplate
-        {
-            Name = $"Шаблон {Templates.Count + 1}"
-        };
-
-        Templates.Add(template);
-        SelectedTemplate = template;
-    }
-
-    private void DuplicateTemplate_Click(object sender, RoutedEventArgs e)
-    {
-        if (SelectedTemplate is null)
-        {
-            return;
-        }
-
-        var template = SelectedTemplate.CloneAs($"{SelectedTemplate.Name} - копия");
-        Templates.Add(template);
-        SelectedTemplate = template;
-    }
-
-    private void DeleteTemplate_Click(object sender, RoutedEventArgs e)
-    {
-        if (SelectedTemplate is null || Templates.Count <= 1)
-        {
-            MessageBox.Show(this, "Нужен хотя бы один шаблон печати.", "Удаление шаблона", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        var templateToDelete = SelectedTemplate;
-        if (MessageBox.Show(this, $"Удалить шаблон \"{templateToDelete.Name}\"?", "Удаление шаблона", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        {
-            return;
-        }
-
-        Templates.Remove(templateToDelete);
-        SelectedTemplate = Templates.FirstOrDefault();
-
-        if (SelectedTemplate is not null)
-        {
-            foreach (var file in Files.Where(file => file.AssignedTemplateId == templateToDelete.Id))
-            {
-                file.AssignTemplate(SelectedTemplate);
-            }
-        }
-
-        UpdatePreview();
-    }
-
-    private void SaveTemplates_Click(object sender, RoutedEventArgs e)
-    {
-        SaveTemplates(showMessage: true);
-    }
-
-    private void OpenTemplateSettings_Click(object sender, RoutedEventArgs e)
-    {
-        if (SelectedTemplate is null)
-        {
-            return;
-        }
-
-        var snapshot = SelectedTemplate.CloneAs(SelectedTemplate.Name);
-        snapshot.Id = SelectedTemplate.Id;
-        var preview = GetTemplatePreviewSource();
-        var window = new TemplateSettingsWindow(SelectedTemplate, FontFamilies, preview.Text, preview.FileName)
-        {
-            Owner = this
-        };
-
-        if (window.ShowDialog() == true)
-        {
-            SaveTemplates(showMessage: false);
-            RefreshAssignedTemplateNames();
-            OverallStatus = $"Детальный шаблон \"{SelectedTemplate.Name}\" обновлен.";
-            UpdatePreview();
-            return;
-        }
-
-        SelectedTemplate.CopyFrom(snapshot);
-        RefreshAssignedTemplateNames();
+        PrintSettings = new PrintSettings();
+        OverallStatus = "Параметры печати сброшены.";
         UpdatePreview();
     }
 
@@ -841,18 +692,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        if (SelectedTemplate is null)
-        {
-            MessageBox.Show(this, "Создайте или выберите шаблон печати.", "Печать", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        SaveTemplates(showMessage: false);
-
         PrintDialog printDialog;
         try
         {
-            printDialog = CreatePrintDialog(SelectedTemplate);
+            PrintSettings.Normalize();
+            PrintSettings.GetPageRange();
+            PrintSettingsStore.Save(PrintSettings);
+            printDialog = CreatePrintDialog(PrintSettings);
         }
         catch (Exception ex)
         {
@@ -872,7 +718,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             foreach (var file in Files)
             {
-                var template = GetTemplateForFile(file);
                 file.Status = "Печатается";
                 CurrentPrintingFile = file.FileName;
                 OverallStatus = $"Печатается {processedCount + 1} из {Files.Count}: {file.FileName}";
@@ -880,18 +725,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
                 try
                 {
-                    ApplyTemplateToPrintTicket(printDialog, template);
+                    ApplyPrintSettingsToPrintTicket(printDialog, PrintSettings);
                     if (IsDocxFile(file))
                     {
-                        await PrintDocxFileAsync(file, printDialog, template);
+                        await PrintDocxFileAsync(file, printDialog, PrintSettings);
                     }
                     else if (IsInternalPrintFile(file))
                     {
-                        PrintTextFile(printDialog, file, template);
+                        PrintTextFile(printDialog, file, PrintSettings);
                     }
                     else if (PdfExtensions.Contains(file.Extension))
                     {
-                        await PrintPdfFileAsync(file.FullPath, printDialog, template, file.FileName);
+                        await PrintPdfFileAsync(file.FullPath, printDialog, PrintSettings, file.FileName);
                     }
                     else
                     {
@@ -976,7 +821,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _scanCancellation?.Cancel();
         _scannerWakeCancellation?.Cancel();
-        SaveTemplates(showMessage: false);
+        SavePrintSettings();
         CleanupTemporaryPdfFiles();
         CleanupScanPages();
         base.OnClosing(e);
@@ -1723,11 +1568,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void AddFiles(IEnumerable<string> paths)
     {
-        if (SelectedTemplate is null)
-        {
-            return;
-        }
-
         var existingPaths = Files.Select(file => file.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var addedCount = 0;
         var skippedCount = 0;
@@ -1742,9 +1582,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             try
             {
-                var item = new PrintFileItem(path);
-                item.AssignTemplate(SelectedTemplate);
-                Files.Add(item);
+                Files.Add(new PrintFileItem(path));
                 existingPaths.Add(path);
                 addedCount++;
             }
@@ -1853,18 +1691,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return TextExtensions.Contains(extension) || DocumentExtensions.Contains(extension);
     }
 
-    private PrintTemplate GetTemplateForFile(PrintFileItem file)
-    {
-        if (UseOneTemplateForAll)
-        {
-            return SelectedTemplate!;
-        }
-
-        return Templates.FirstOrDefault(template => template.Id == file.AssignedTemplateId)
-               ?? SelectedTemplate!;
-    }
-
-    private PrintDialog CreatePrintDialog(PrintTemplate template)
+    private PrintDialog CreatePrintDialog(PrintSettings settings)
     {
         var dialog = new PrintDialog();
 
@@ -1885,40 +1712,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             throw new InvalidOperationException("принтер по умолчанию недоступен.", ex);
         }
 
-        ApplyTemplateToPrintTicket(dialog, template);
+        ApplyPrintSettingsToPrintTicket(dialog, settings);
         return dialog;
     }
 
-    private static void ApplyTemplateToPrintTicket(PrintDialog dialog, PrintTemplate template)
+    private static void ApplyPrintSettingsToPrintTicket(PrintDialog dialog, PrintSettings settings)
     {
         dialog.PrintTicket ??= new PrintTicket();
-        ApplyTemplateToPrintTicket(dialog.PrintTicket, template);
+        ApplyPrintSettingsToPrintTicket(dialog.PrintTicket, settings);
     }
 
-    private static void ApplyTemplateToPrintTicket(PrintTicket printTicket, PrintTemplate template)
+    private static void ApplyPrintSettingsToPrintTicket(PrintTicket printTicket, PrintSettings settings)
     {
-        printTicket.PageOrientation = template.PageOrientation == "Landscape"
+        printTicket.PageOrientation = settings.PageOrientation == "Landscape"
             ? PageOrientation.Landscape
             : PageOrientation.Portrait;
-        printTicket.Duplexing = template.DuplexMode switch
+        printTicket.Duplexing = settings.DuplexMode switch
         {
             "TwoSidedLongEdge" => Duplexing.TwoSidedLongEdge,
             _ => Duplexing.OneSided
         };
-        printTicket.CopyCount = Math.Clamp(template.Copies, 1, 99);
+        printTicket.OutputColor = settings.ColorMode == "Monochrome"
+            ? OutputColor.Monochrome
+            : OutputColor.Color;
+        printTicket.CopyCount = Math.Clamp(settings.Copies, 1, 99);
     }
 
-    private static void PrintTextFile(PrintDialog dialog, PrintFileItem file, PrintTemplate template)
+    private static void PrintTextFile(PrintDialog dialog, PrintFileItem file, PrintSettings settings)
     {
         var pageSize = GetPrintablePageSize(dialog);
         var document = BuildTextDocument(
             file.FileName,
             ReadPrintableDocumentText(file),
-            template,
+            settings,
             pageSize.Width,
             pageSize.Height);
 
-        dialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, file.FileName);
+        var paginator = ((IDocumentPaginatorSource)document).DocumentPaginator;
+        var range = settings.GetPageRange();
+        dialog.PrintDocument(
+            new PageRangeDocumentPaginator(paginator, range.FromPage, range.ToPage),
+            file.FileName);
     }
 
     private static Size GetPrintablePageSize(PrintDialog dialog)
@@ -1949,20 +1783,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             : new Size(a4Width, a4Height);
     }
 
-    private async Task PrintDocxFileAsync(PrintFileItem file, PrintDialog dialog, PrintTemplate template)
+    private async Task PrintDocxFileAsync(PrintFileItem file, PrintDialog dialog, PrintSettings printSettings)
     {
-        ApplyTemplateToPrintTicket(dialog, template);
+        ApplyPrintSettingsToPrintTicket(dialog, printSettings);
         var printerName = dialog.PrintQueue?.Name;
         if (string.IsNullOrWhiteSpace(printerName))
         {
             throw new InvalidOperationException("Не удалось определить выбранный принтер.");
         }
 
+        var range = printSettings.GetPageRange();
         var settings = new WordPrintSettings(
             printerName,
-            Math.Clamp(template.Copies, 1, 99),
-            template.PageOrientation == "Landscape",
-            template.DuplexMode == "TwoSidedLongEdge");
+            Math.Clamp(printSettings.Copies, 1, 99),
+            printSettings.PageOrientation == "Landscape",
+            printSettings.DuplexMode == "TwoSidedLongEdge",
+            printSettings.ColorMode != "Monochrome",
+            range.FromPage,
+            range.ToPage);
 
         OverallStatus = $"Microsoft Word отправляет {file.FileName} одним заданием...";
         await Dispatcher.Yield(DispatcherPriority.Background);
@@ -1972,7 +1810,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task PrintPdfFileAsync(
         string pdfPath,
         PrintDialog dialog,
-        PrintTemplate template,
+        PrintSettings printSettings,
         string? printJobName = null)
     {
         if (!File.Exists(pdfPath))
@@ -1980,7 +1818,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             throw new FileNotFoundException("PDF-файл для печати не найден.", pdfPath);
         }
 
-        ApplyTemplateToPrintTicket(dialog, template);
+        ApplyPrintSettingsToPrintTicket(dialog, printSettings);
         var displayName = string.IsNullOrWhiteSpace(printJobName)
             ? Path.GetFileName(pdfPath)
             : printJobName;
@@ -1995,12 +1833,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OverallStatus = $"Печать {displayName}: страница {value.CurrentPage} из {value.TotalPages}";
         });
 
+        var range = printSettings.GetPageRange();
         var settings = new PdfPrintSettings(
             printerName,
             displayName,
-            Math.Clamp(template.Copies, 1, 99),
-            template.PageOrientation == "Landscape",
-            template.DuplexMode == "TwoSidedLongEdge");
+            Math.Clamp(printSettings.Copies, 1, 99),
+            printSettings.PageOrientation == "Landscape",
+            printSettings.DuplexMode == "TwoSidedLongEdge",
+            printSettings.ColorMode != "Monochrome",
+            range.FromPage,
+            range.ToPage,
+            printSettings.PdfPageSizing == "ActualSize");
 
         OverallStatus = $"Отправка {displayName} на принтер одним заданием...";
         await Dispatcher.Yield(DispatcherPriority.Background);
@@ -2009,20 +1852,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void UpdatePreview()
     {
-        if (!IsLoaded || SelectedTemplate is null)
+        if (!IsLoaded)
         {
             return;
         }
 
         var previewVersion = ++_previewVersion;
         var selectedFile = FilesGrid.SelectedItem as PrintFileItem;
-        var template = selectedFile is null ? SelectedTemplate : GetTemplateForFile(selectedFile);
+        var settings = PrintSettings;
 
         HidePreviewSurfaces();
 
         if (selectedFile is null)
         {
-            ShowFlowPreview(BuildTextDocument("Пример документа.txt", CreateDefaultPreviewText(), template, GetPreviewPageWidth(template), GetPreviewPageHeight(template)));
+            ShowFlowPreview(BuildTextDocument("Пример документа.txt", CreateDefaultPreviewText(), settings, GetPreviewPageWidth(settings), GetPreviewPageHeight(settings)));
             return;
         }
 
@@ -2076,7 +1919,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return;
             }
 
-            var document = BuildTextDocument(selectedFile.FileName, ReadPrintableDocumentText(selectedFile), template, GetPreviewPageWidth(template), GetPreviewPageHeight(template));
+            var document = BuildTextDocument(selectedFile.FileName, ReadPrintableDocumentText(selectedFile), settings, GetPreviewPageWidth(settings), GetPreviewPageHeight(settings));
 
             ShowFlowPreview(document);
         }
@@ -2213,7 +2056,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     var outputPath = CreatePermanentPdfPath(file.FileName, outputFolder);
                     try
                     {
-                        await ConvertPrintableFileToPdfAsync(file, outputPath, SelectedTemplate ?? Templates.FirstOrDefault() ?? new PrintTemplate());
+                        await ConvertPrintableFileToPdfAsync(file, outputPath);
                     }
                     catch
                     {
@@ -2246,7 +2089,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task ConvertPrintableFileToPdfAsync(PrintFileItem file, string outputPath, PrintTemplate template)
+    private async Task ConvertPrintableFileToPdfAsync(PrintFileItem file, string outputPath)
     {
         if (IsDocxFile(file))
         {
@@ -2254,7 +2097,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var html = BuildPdfConversionHtml(file.FileName, ReadPrintableDocumentText(file), template);
+        var html = BuildPdfConversionHtml(file.FileName, ReadPrintableDocumentText(file));
 
         await _pdfConversionLock.WaitAsync();
         try
@@ -2265,7 +2108,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var coreWebView = ConversionPdfBrowser.CoreWebView2
                               ?? throw new InvalidOperationException("PDF-конвертер WebView2 не инициализирован.");
             var printSettings = coreWebView.Environment.CreatePrintSettings();
-            ApplyTemplateToPdfFileSettings(printSettings, template);
+            ApplyTextConversionPdfSettings(printSettings);
 
             var success = await coreWebView.PrintToPdfAsync(outputPath, printSettings);
             EnsurePdfWasCreated(success, outputPath);
@@ -2313,77 +2156,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private static string BuildPdfConversionHtml(string fileName, string text, PrintTemplate template)
+    private static string BuildPdfConversionHtml(string fileName, string text)
     {
         var title = System.Net.WebUtility.HtmlEncode(fileName);
         var body = System.Net.WebUtility.HtmlEncode(text);
-        var fontFamily = EscapeCssString(string.IsNullOrWhiteSpace(template.FontFamily) ? "Segoe UI" : template.FontFamily);
-        var fontSize = Math.Clamp(template.FontSize, 8, 72).ToString(CultureInfo.InvariantCulture);
-        var lineHeight = Math.Clamp(template.LineSpacing, 1, 3).ToString(CultureInfo.InvariantCulture);
-        var whiteSpace = template.WordWrap ? "pre-wrap" : "pre";
-        var wrap = template.WordWrap ? "overflow-wrap: anywhere;" : "overflow-wrap: normal;";
-        var header = template.IncludeFileNameHeader ? $"<div class=\"header\">{title}</div>" : string.Empty;
-        var footer = template.IncludePrintedAtFooter
-            ? $"<div class=\"footer\">Напечатано: {DateTime.Now:dd.MM.yyyy HH:mm}</div>"
-            : string.Empty;
 
         return $$"""
                 <!doctype html>
                 <html>
                 <head>
                     <meta charset="utf-8">
+                    <title>{{title}}</title>
                     <style>
-                        @page { size: A4 {{(template.PageOrientation == "Landscape" ? "landscape" : "portrait")}}; margin: 0; }
+                        @page { size: A4 portrait; margin: 15mm; }
                         body {
                             margin: 0;
                             color: #111827;
-                            font-family: "{{fontFamily}}", "Segoe UI", Arial, sans-serif;
-                            font-size: {{fontSize}}pt;
-                            line-height: {{lineHeight}};
-                            white-space: {{whiteSpace}};
-                            {{wrap}}
-                        }
-                        .header {
-                            color: #6b7280;
-                            font-size: 10pt;
-                            font-weight: 600;
-                            border-bottom: 1px solid #d1d5db;
-                            margin-bottom: 12pt;
-                            padding-bottom: 6pt;
-                        }
-                        .footer {
-                            color: #6b7280;
-                            font-size: 9pt;
-                            margin-top: 14pt;
+                            font-family: "Segoe UI", Arial, sans-serif;
+                            font-size: 11pt;
+                            line-height: 1.25;
+                            white-space: pre-wrap;
+                            overflow-wrap: anywhere;
                         }
                     </style>
                 </head>
-                <body>{{header}}<div>{{body}}</div>{{footer}}</body>
+                <body>{{body}}</body>
                 </html>
                 """;
     }
 
-    private static string EscapeCssString(string value)
+    private static void ApplyTextConversionPdfSettings(CoreWebView2PrintSettings printSettings)
     {
-        return value.Replace("\\", "\\\\", StringComparison.Ordinal)
-            .Replace("\"", "\\\"", StringComparison.Ordinal);
-    }
-
-    private static void ApplyTemplateToPdfFileSettings(CoreWebView2PrintSettings printSettings, PrintTemplate template)
-    {
-        printSettings.Orientation = template.PageOrientation == "Landscape"
-            ? CoreWebView2PrintOrientation.Landscape
-            : CoreWebView2PrintOrientation.Portrait;
+        printSettings.Orientation = CoreWebView2PrintOrientation.Portrait;
         printSettings.ShouldPrintHeaderAndFooter = false;
         printSettings.ShouldPrintBackgrounds = true;
         printSettings.PagesPerSide = 1;
         printSettings.ScaleFactor = 1;
-        printSettings.PageWidth = template.PageOrientation == "Landscape" ? 11.69 : 8.27;
-        printSettings.PageHeight = template.PageOrientation == "Landscape" ? 8.27 : 11.69;
-        printSettings.MarginTop = MmToInches(template.MarginTop);
-        printSettings.MarginBottom = MmToInches(template.MarginBottom);
-        printSettings.MarginLeft = MmToInches(template.MarginLeft);
-        printSettings.MarginRight = MmToInches(template.MarginRight);
+        printSettings.PageWidth = 8.27;
+        printSettings.PageHeight = 11.69;
+        printSettings.MarginTop = MmToInches(15);
+        printSettings.MarginBottom = MmToInches(15);
+        printSettings.MarginLeft = MmToInches(15);
+        printSettings.MarginRight = MmToInches(15);
     }
 
     private static void EnsurePdfWasCreated(bool success, string outputPath)
@@ -2897,107 +2711,55 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return LogicalTreeHelper.GetParent(current);
     }
 
-    private static void NormalizeTemplate(PrintTemplate template)
+    private static FlowDocument BuildTextDocument(string fileName, string text, PrintSettings settings, double pageWidth, double pageHeight)
     {
-        if (template.DuplexMode is not ("OneSided" or "TwoSidedLongEdge"))
-        {
-            template.DuplexMode = "OneSided";
-        }
-    }
+        _ = fileName;
 
-    private static FlowDocument BuildTextDocument(string fileName, string text, PrintTemplate template, double pageWidth, double pageHeight)
-    {
-        var document = CreateDocumentShell(template, pageWidth, pageHeight);
-        AddHeader(document, fileName, template);
-
-        document.Blocks.Add(new Paragraph(new Run(text))
-        {
-            Margin = new Thickness(0),
-            LineHeight = template.FontSize * Math.Clamp(template.LineSpacing, 1, 3)
-        });
-
-        AddFooter(document, template);
-        return document;
-    }
-
-    private static FlowDocument CreateDocumentShell(PrintTemplate template, double pageWidth, double pageHeight)
-    {
-        if (template.PageOrientation == "Landscape" && pageHeight > pageWidth)
+        if (settings.PageOrientation == "Landscape" && pageHeight > pageWidth)
         {
             (pageWidth, pageHeight) = (pageHeight, pageWidth);
         }
-        else if (template.PageOrientation != "Landscape" && pageWidth > pageHeight)
+        else if (settings.PageOrientation != "Landscape" && pageWidth > pageHeight)
         {
             (pageWidth, pageHeight) = (pageHeight, pageWidth);
         }
 
-        var fontSize = Math.Clamp(template.FontSize, 8, 72);
-        return new FlowDocument
+        const double fontSize = 11;
+        var document = new FlowDocument
         {
             PageWidth = pageWidth,
             MinPageWidth = pageWidth,
             MaxPageWidth = pageWidth,
             PageHeight = pageHeight,
             PagePadding = new Thickness(
-                MmToDiu(template.MarginLeft),
-                MmToDiu(template.MarginTop),
-                MmToDiu(template.MarginRight),
-                MmToDiu(template.MarginBottom)),
-            ColumnWidth = template.WordWrap ? double.PositiveInfinity : 100000,
-            FontFamily = new FontFamily(string.IsNullOrWhiteSpace(template.FontFamily) ? "Segoe UI" : template.FontFamily),
+                MmToDiu(15),
+                MmToDiu(15),
+                MmToDiu(15),
+                MmToDiu(15)),
+            ColumnWidth = double.PositiveInfinity,
+            FontFamily = new FontFamily("Segoe UI"),
             FontSize = fontSize,
             TextAlignment = TextAlignment.Left,
             Background = Brushes.White
         };
-    }
 
-    private static void AddHeader(FlowDocument document, string fileName, PrintTemplate template)
-    {
-        if (!template.IncludeFileNameHeader)
+        document.Blocks.Add(new Paragraph(new Run(text))
         {
-            return;
-        }
-
-        var header = new Paragraph(new Run(fileName))
-        {
-            FontSize = Math.Clamp(template.FontSize, 8, 72) + 2,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 10)
-        };
-
-        if (document.Blocks.FirstBlock is null)
-        {
-            document.Blocks.Add(header);
-        }
-        else
-        {
-            document.Blocks.InsertBefore(document.Blocks.FirstBlock, header);
-        }
-    }
-
-    private static void AddFooter(FlowDocument document, PrintTemplate template)
-    {
-        if (!template.IncludePrintedAtFooter)
-        {
-            return;
-        }
-
-        document.Blocks.Add(new Paragraph(new Run($"Напечатано: {DateTime.Now:dd.MM.yyyy HH:mm}"))
-        {
-            Foreground = Brushes.Gray,
-            FontSize = Math.Max(Math.Clamp(template.FontSize, 8, 72) - 1, 8),
-            Margin = new Thickness(0, 14, 0, 0)
+            Margin = new Thickness(0),
+            LineHeight = fontSize * 1.25
         });
+
+        return document;
     }
 
-    private static double GetPreviewPageWidth(PrintTemplate template)
+    private static double GetPreviewPageWidth(PrintSettings settings)
     {
-        return template.PageOrientation == "Landscape" ? 980d : 700d;
+        return settings.PageOrientation == "Landscape" ? 980d : 700d;
     }
 
-    private static double GetPreviewPageHeight(PrintTemplate template)
+    private static double GetPreviewPageHeight(PrintSettings settings)
     {
-        return template.PageOrientation == "Landscape" ? 700d : 980d;
+        return settings.PageOrientation == "Landscape" ? 700d : 980d;
     }
 
     private static string ReadPrintableDocumentText(PrintFileItem file)
@@ -3075,65 +2837,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return Math.Clamp(millimeters, 0, 100) / 25.4;
     }
 
-    private (string FileName, string Text) GetTemplatePreviewSource()
-    {
-        var selectedFile = FilesGrid.SelectedItem as PrintFileItem ?? Files.FirstOrDefault();
-        if (selectedFile is not null)
-        {
-            if (IsInternalPrintFile(selectedFile))
-            {
-                try
-                {
-                    return (selectedFile.FileName, ReadPrintableDocumentText(selectedFile));
-                }
-                catch
-                {
-                    return (selectedFile.FileName, CreateDefaultPreviewText());
-                }
-            }
-
-            return (selectedFile.FileName, CreateDefaultPreviewText());
-        }
-
-        return ("Пример документа.txt", CreateDefaultPreviewText());
-    }
-
     private static string CreateDefaultPreviewText()
     {
         return "UISI Print Master" + Environment.NewLine +
                Environment.NewLine +
-               "Это пример документа для предпросмотра печати. Он помогает увидеть базовые параметры листа, поля, шрифт, межстрочный интервал и перенос длинных строк." + Environment.NewLine +
+               "Это пример документа для предпросмотра печати." + Environment.NewLine +
                Environment.NewLine +
-               "Добавьте файл в очередь или выберите существующий документ, чтобы предпросмотр строился на реальном содержимом.";
+               "Добавьте файл в очередь или выберите документ, чтобы увидеть его содержимое.";
     }
 
-    private void SaveTemplates(bool showMessage)
+    private void SavePrintSettings()
     {
         try
         {
-            TemplateStore.Save(Templates);
-            RefreshAssignedTemplateNames();
-
-            if (showMessage)
-            {
-                MessageBox.Show(this, "Шаблоны сохранены.", "Шаблоны печати", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
+            PrintSettingsStore.Save(PrintSettings);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Не удалось сохранить шаблоны: {ex.Message}", "Шаблоны печати", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private void RefreshAssignedTemplateNames()
-    {
-        foreach (var file in Files)
-        {
-            var template = Templates.FirstOrDefault(item => item.Id == file.AssignedTemplateId);
-            if (template is not null)
-            {
-                file.TemplateName = template.Name;
-            }
+            MessageBox.Show(this, $"Не удалось сохранить параметры печати: {ex.Message}", "Параметры печати", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -3156,14 +2877,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OnPropertyChanged(nameof(CanEditScans));
     }
 
-    private void SelectedTemplate_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private void PrintSettings_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PrintTemplate.Name))
-        {
-            RefreshAssignedTemplateNames();
-        }
-
-        if (IsLoaded)
+        if (IsLoaded &&
+            e.PropertyName == nameof(PrintSettings.PageOrientation))
         {
             UpdatePreview();
         }

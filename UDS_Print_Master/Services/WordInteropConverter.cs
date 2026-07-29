@@ -9,6 +9,9 @@ internal sealed record WordPrintSettings(
     int Copies,
     bool Landscape,
     bool Duplex,
+    bool Color = true,
+    int? FromPage = null,
+    int? ToPage = null,
     string? PrintToFilePath = null);
 
 internal static class WordInteropConverter
@@ -21,6 +24,8 @@ internal static class WordInteropConverter
     private const int WdExportAllDocument = 0;
     private const int WdExportDocumentContent = 0;
     private const int WdExportCreateHeadingBookmarks = 1;
+    private const int WdPrintAllDocument = 0;
+    private const int WdPrintFromTo = 3;
     private const int MsoAutomationSecurityForceDisable = 3;
 
     public static async Task ConvertToPdfAsync(
@@ -151,11 +156,20 @@ internal static class WordInteropConverter
         {
             SelectWordPrinter(word, settings.PrinterName);
             document.Activate();
+            var customRange = settings.FromPage.HasValue;
+            var printRange = customRange
+                ? WdPrintFromTo
+                : WdPrintAllDocument;
+            var fromPage = settings.FromPage ?? 1;
+            var toPage = settings.ToPage ?? fromPage;
 
             if (printToFilePath is null)
             {
                 document.PrintOut(
                     Background: false,
+                    Range: printRange,
+                    From: fromPage.ToString(),
+                    To: toPage.ToString(),
                     Copies: copies,
                     PrintToFile: false,
                     Collate: true);
@@ -164,6 +178,9 @@ internal static class WordInteropConverter
             {
                 document.PrintOut(
                     Background: false,
+                    Range: printRange,
+                    From: fromPage.ToString(),
+                    To: toPage.ToString(),
                     OutputFileName: printToFilePath,
                     Copies: copies,
                     PrintToFile: true,
@@ -340,7 +357,10 @@ internal static class WordInteropConverter
                         : PageOrientation.Portrait,
                     Duplexing = settings.Duplex
                         ? Duplexing.TwoSidedLongEdge
-                        : Duplexing.OneSided
+                        : Duplexing.OneSided,
+                    OutputColor = settings.Color
+                        ? OutputColor.Color
+                        : OutputColor.Monochrome
                 };
                 var validatedTicket = queue
                     .MergeAndValidatePrintTicket(originalTicket, deltaTicket)
