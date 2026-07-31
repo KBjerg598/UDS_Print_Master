@@ -1107,7 +1107,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var tempFolder = Path.Combine(Path.GetTempPath(), "UISI Print Master", "Scans");
+        var tempFolder = Path.Combine(Path.GetTempPath(), "UISI PrintMaster", "Scans");
         var request = new ScanRequest(
             scanner.DeviceId,
             useFeeder,
@@ -1392,7 +1392,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task SaveScanGroupAsPdfAsync(IReadOnlyList<ScanPageItem> pages, string outputPath)
     {
-        var tempFolder = Path.Combine(Path.GetTempPath(), "UISI Print Master", "ScanPdf");
+        var tempFolder = Path.Combine(Path.GetTempPath(), "UISI PrintMaster", "ScanPdf");
         Directory.CreateDirectory(tempFolder);
         var htmlPath = Path.Combine(tempFolder, $"scan-{Guid.NewGuid():N}.html");
 
@@ -2210,7 +2210,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private string CreateTemporaryPdfPath(PrintFileItem file, string scope)
     {
-        var folder = Path.Combine(Path.GetTempPath(), "UISI Print Master", scope);
+        var folder = Path.Combine(Path.GetTempPath(), "UISI PrintMaster", scope);
         Directory.CreateDirectory(folder);
 
         var fileName = MakeSafeFileName(Path.GetFileNameWithoutExtension(file.FileName));
@@ -2839,7 +2839,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static string CreateDefaultPreviewText()
     {
-        return "UISI Print Master" + Environment.NewLine +
+        return "UISI PrintMaster" + Environment.NewLine +
                Environment.NewLine +
                "Это пример документа для предпросмотра печати." + Environment.NewLine +
                Environment.NewLine +

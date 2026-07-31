@@ -3,8 +3,11 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <AssemblyName>UISI_Print_Master</AssemblyName>
+    <AssemblyName>UISI PrintMaster</AssemblyName>
     <RootNamespace>UDS_Print_Master</RootNamespace>
+    <Title>UISI PrintMaster</Title>
+    <Product>UISI PrintMaster</Product>
+    <Description>Печать, конвертация и сканирование документов.</Description>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -17,7 +20,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
-    <AssemblyName>UISI_Print_Master.Debug</AssemblyName>
+    <AssemblyName>UISI PrintMaster.Debug</AssemblyName>
     <OutputPath>..\artifacts\debug\bin\</OutputPath>
     <IntermediateOutputPath>..\artifacts\debug\obj\</IntermediateOutputPath>
   </PropertyGroup>
