@@ -90,6 +90,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private DateTime _currentPreviewSourceWriteTimeUtc;
     private readonly WiaScannerService _scannerService = new();
     private readonly PrinterWakeService _printerWakeService = new();
+    private readonly AppUpdateService _updateService = new();
     private ScannerDeviceInfo? _selectedScanner;
     private ScannerCapabilities? _selectedScannerCapabilities;
     private ScanPageItem? _selectedScanPage;
@@ -125,6 +126,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ScanPages.CollectionChanged += ScanPages_CollectionChanged;
         PrintSettings = PrintSettingsStore.Load();
         DataContext = this;
+        _updateService.StatusChanged += UpdateUpdateBadge;
 
         Loaded += MainWindow_Loaded;
     }
@@ -521,9 +523,90 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        _ = CheckForUpdatesAutomaticallyAsync();
         UpdatePreview();
         await LoadPrintersAsync();
         await RefreshScannersAsync(loadCapabilities: false);
+    }
+
+    private async Task CheckForUpdatesAutomaticallyAsync()
+    {
+        if (!_updateService.IsInstalled || !_updateService.ShouldCheckAutomatically())
+        {
+            return;
+        }
+
+        try
+        {
+            await _updateService.CheckForUpdatesAsync();
+        }
+        finally
+        {
+            _updateService.RecordAutomaticCheck();
+        }
+    }
+
+    private void ShowUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        var updateWindow = new UpdateWindow(_updateService)
+        {
+            Owner = this
+        };
+
+        updateWindow.ShowDialog();
+        UpdateUpdateBadge(_updateService.LastStatus);
+    }
+
+    private void UpdateUpdateBadge(AppUpdateStatus status)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => UpdateUpdateBadge(status));
+            return;
+        }
+
+        var hasUpdate = status.State is AppUpdateState.Available or AppUpdateState.ReadyToInstall;
+        UpdateAvailableBadge.Visibility = hasUpdate
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateAvailableBadgeText.Text = status.State == AppUpdateState.ReadyToInstall
+            ? "100%"
+            : "NEW";
+        UpdatesButton.ToolTip = status.Title;
+    }
+
+    internal bool TryPrepareForUpdate(out string reason)
+    {
+        if (IsPrinting)
+        {
+            reason = "Дождитесь завершения печати перед установкой обновления.";
+            return false;
+        }
+
+        if (IsConverting)
+        {
+            reason = "Дождитесь завершения конвертации перед установкой обновления.";
+            return false;
+        }
+
+        if (IsScanning || IsSavingScans || IsWakingScanner)
+        {
+            reason = "Дождитесь завершения работы со сканером перед установкой обновления.";
+            return false;
+        }
+
+        if (ScanPages.Count > 0)
+        {
+            reason = "Сохраните или удалите текущие сканы перед установкой обновления.";
+            return false;
+        }
+
+        _scanCancellation?.Cancel();
+        _scannerWakeCancellation?.Cancel();
+        SavePrintSettings();
+        CleanupTemporaryPdfFiles();
+        reason = string.Empty;
+        return true;
     }
 
     private async void MainWorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -829,6 +912,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     protected override void OnClosed(EventArgs e)
     {
+        _updateService.StatusChanged -= UpdateUpdateBadge;
+
         try
         {
             PdfPreviewBrowser.Dispose();

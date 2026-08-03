@@ -120,8 +120,9 @@
                         CornerRadius="16"
                         Padding="7"
                         VerticalAlignment="Center">
-                    <Image Source="Assets/UISI-Logo-BW.png"
-                           Stretch="UniformToFill" />
+                    <Image Source="Assets/UISI-Logo-Header.png"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
                 </Border>
 
                 <StackPanel Grid.Column="1"
@@ -140,6 +141,34 @@
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
+                    <Button x:Name="UpdatesButton"
+                            Margin="0,0,10,0"
+                            Padding="14,0"
+                            Style="{StaticResource MaterialDesignOutlinedButton}"
+                            Click="ShowUpdates_Click"
+                            ToolTip="Центр обновлений">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="Update"
+                                                     Width="19"
+                                                     Height="19"
+                                                     Margin="0,0,7,0" />
+                            <TextBlock VerticalAlignment="Center"
+                                       Text="Обновления" />
+                            <Border x:Name="UpdateAvailableBadge"
+                                    Margin="8,0,0,0"
+                                    Padding="6,2"
+                                    VerticalAlignment="Center"
+                                    Background="#DC2626"
+                                    CornerRadius="7"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="UpdateAvailableBadgeText"
+                                           FontSize="9"
+                                           FontWeight="Bold"
+                                           Foreground="White"
+                                           Text="NEW" />
+                            </Border>
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="PrintQueueButton"
                             Style="{StaticResource MaterialDesignRaisedButton}"
                             Click="PrintQueue_Click"
