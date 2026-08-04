@@ -11,7 +11,7 @@
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AppBackgroundBrush}"
         Icon="Assets/UISI-Logo-BW.ico"
-        Style="{StaticResource MaterialDesignWindow}"
+        Style="{StaticResource AppWindowStyle}"
         TextElement.Foreground="{StaticResource AppInkBrush}"
         TextElement.FontFamily="{DynamicResource MaterialDesignFont}"
         AllowDrop="True"
@@ -121,7 +121,6 @@
                              Padding="16"
                              Background="{StaticResource AppSurfaceBrush}"
                              UniformCornerRadius="8"
-                             MouseLeftButtonDown="WindowHeader_MouseLeftButtonDown"
                              materialDesign:ElevationAssist.Elevation="Dp2">
             <Grid>
                 <Grid.ColumnDefinitions>

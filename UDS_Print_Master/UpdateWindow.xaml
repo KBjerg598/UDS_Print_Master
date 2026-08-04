@@ -10,7 +10,7 @@
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource AppBackgroundBrush}"
         Icon="Assets/UISI-Logo-BW.ico"
-        Style="{StaticResource MaterialDesignWindow}"
+        Style="{StaticResource AppWindowStyle}"
         TextElement.Foreground="{StaticResource AppInkBrush}"
         TextElement.FontFamily="{DynamicResource MaterialDesignFont}"
         Loaded="Window_Loaded"

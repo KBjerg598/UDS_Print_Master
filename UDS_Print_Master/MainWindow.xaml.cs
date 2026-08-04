@@ -541,27 +541,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void WindowHeader_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Left)
-        {
-            return;
-        }
-
-        if (e.ClickCount == 2)
-        {
-            WindowState = WindowState == WindowState.Maximized
-                ? WindowState.Normal
-                : WindowState.Maximized;
-            return;
-        }
-
-        if (e.ButtonState == MouseButtonState.Pressed)
-        {
-            DragMove();
-        }
-    }
-
     private async Task CheckForUpdatesAutomaticallyAsync()
     {
         if (!_updateService.IsInstalled || !_updateService.ShouldCheckAutomatically())
