@@ -12,12 +12,16 @@
                 <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
-            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F5F7FB" />
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F6FA" />
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="AppInkBrush" Color="#111827" />
             <SolidColorBrush x:Key="AppMutedBrush" Color="#64748B" />
-            <SolidColorBrush x:Key="AppLineBrush" Color="#E2E8F0" />
-            <SolidColorBrush x:Key="AppSoftBlueBrush" Color="#EAF2FF" />
+            <SolidColorBrush x:Key="AppLineBrush" Color="#DCE3EC" />
+            <SolidColorBrush x:Key="AppSoftBlueBrush" Color="#EDF4FF" />
+            <SolidColorBrush x:Key="AppPrimaryBrush" Color="#2563EB" />
+            <SolidColorBrush x:Key="AppSuccessBrush" Color="#0F766E" />
+            <SolidColorBrush x:Key="AppDangerBrush" Color="#B42318" />
+            <SolidColorBrush x:Key="AppSubtleSurfaceBrush" Color="#F8FAFC" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

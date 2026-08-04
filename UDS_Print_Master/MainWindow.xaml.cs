@@ -114,6 +114,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _suppressScannerCapabilityLoading;
     private bool _startNextScanAsNewDocument;
     private int _scannerCapabilitiesVersion;
+    private int _scannerWakeVersion;
     private CancellationTokenSource? _scanCancellation;
     private CancellationTokenSource? _scannerWakeCancellation;
 
@@ -423,6 +424,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public bool CanWakeScanner => !IsScanning && !IsSavingScans && !IsWakingScanner && !IsPrinting && !IsConverting;
 
+    public bool CanRestartScannerConnection => !IsScanning && !IsSavingScans && !IsPrinting && !IsConverting;
+
     public bool IsScannerBusy => IsScanning || IsWakingScanner;
 
     public string FilesSummary => Files.Count == 0
@@ -451,6 +454,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanConvert));
                 OnPropertyChanged(nameof(CanStartScan));
                 OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(CanRestartScannerConnection));
             }
         }
     }
@@ -467,6 +471,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanStartScan));
                 OnPropertyChanged(nameof(CanSaveScans));
                 OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(CanRestartScannerConnection));
             }
         }
     }
@@ -485,6 +490,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanPrint));
                 OnPropertyChanged(nameof(CanConvert));
                 OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(CanRestartScannerConnection));
                 OnPropertyChanged(nameof(IsScannerBusy));
             }
         }
@@ -503,6 +509,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanConvert));
                 OnPropertyChanged(nameof(CanPrint));
                 OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(CanRestartScannerConnection));
             }
         }
     }
@@ -516,6 +523,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(CanStartScan));
                 OnPropertyChanged(nameof(CanWakeScanner));
+                OnPropertyChanged(nameof(CanRestartScannerConnection));
                 OnPropertyChanged(nameof(IsScannerBusy));
             }
         }
@@ -526,7 +534,32 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ = CheckForUpdatesAutomaticallyAsync();
         UpdatePreview();
         await LoadPrintersAsync();
-        await RefreshScannersAsync(loadCapabilities: false);
+
+        if (MainWorkspaceTabs.SelectedIndex == 2)
+        {
+            await WakeScannerAndRefreshAsync(restartCurrentAttempt: true);
+        }
+    }
+
+    private void WindowHeader_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
+            return;
+        }
+
+        if (e.ButtonState == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
     }
 
     private async Task CheckForUpdatesAutomaticallyAsync()
@@ -627,7 +660,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (scanningWorkspace && IsLoaded)
         {
-            await WakeScannerAndRefreshAsync();
+            await WakeScannerAndRefreshAsync(restartCurrentAttempt: true);
         }
         else if (!scanningWorkspace)
         {
@@ -937,10 +970,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void RefreshScanners_Click(object sender, RoutedEventArgs e)
     {
-        await WakeScannerAndRefreshAsync();
+        await WakeScannerAndRefreshAsync(restartCurrentAttempt: true);
     }
 
-    private async Task<bool> RefreshScannersAsync(bool loadCapabilities = true)
+    private async Task<bool> RefreshScannersAsync(
+        bool loadCapabilities = true,
+        CancellationToken cancellationToken = default)
     {
         var selectedDeviceId = SelectedScanner?.DeviceId;
         ScanStatus = "Поиск сканеров...";
@@ -950,7 +985,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
-            var devices = await _scannerService.GetScannersAsync();
+            var devices = await _scannerService.GetScannersAsync().WaitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             Scanners.Clear();
             foreach (var device in devices)
             {
@@ -975,7 +1011,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return false;
             }
 
-            return !loadCapabilities || await LoadSelectedScannerCapabilitiesAsync();
+            return !loadCapabilities || await LoadSelectedScannerCapabilitiesAsync(cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1064,17 +1104,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task WakeScannerAndRefreshAsync()
+    private async Task WakeScannerAndRefreshAsync(bool restartCurrentAttempt = false)
     {
-        if (IsWakingScanner || IsScanning || IsSavingScans || IsPrinting || IsConverting)
+        if (IsScanning || IsSavingScans || IsPrinting || IsConverting)
         {
             return;
         }
 
-        _scannerWakeCancellation?.Cancel();
-        _scannerWakeCancellation?.Dispose();
-        _scannerWakeCancellation = new CancellationTokenSource();
-        var cancellationToken = _scannerWakeCancellation.Token;
+        if (IsWakingScanner && !restartCurrentAttempt)
+        {
+            return;
+        }
+
+        var previousCancellation = _scannerWakeCancellation;
+        var wakeCancellation = new CancellationTokenSource();
+        var wakeVersion = ++_scannerWakeVersion;
+        _scannerWakeCancellation = wakeCancellation;
+        previousCancellation?.Cancel();
+
+        var cancellationToken = wakeCancellation.Token;
         IsWakingScanner = true;
         _selectedScannerCapabilities = null;
         OnPropertyChanged(nameof(ScannerCapabilityText));
@@ -1084,13 +1132,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             ScanStatus = "Пробуждение принтера и сканера...";
             var wakeResult = await _printerWakeService.WakeAsync(SelectedPrinterName, SelectedScanner?.Name, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             var initialDelay = wakeResult.NetworkTargetFound
                 ? wakeResult.DeviceResponded ? TimeSpan.FromMilliseconds(700) : TimeSpan.FromSeconds(2.5)
                 : TimeSpan.FromMilliseconds(500);
             await Task.Delay(initialDelay, cancellationToken);
 
-            var scannerFound = await RefreshScannersAsync(loadCapabilities: false);
+            var scannerFound = await RefreshScannersAsync(loadCapabilities: false, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (scannerFound)
             {
                 ScanStatus = wakeResult.ScannerAddressChanged
@@ -1113,7 +1163,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     ScanStatus = $"Сканер запускается и устанавливает служебное соединение... {elapsedSeconds} с из 120 с.";
                 }
 
-                if (await connectionTask)
+                var scannerReady = await connectionTask;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (scannerReady)
                 {
                     ScanStatus = wakeResult.NetworkTargetFound && !string.IsNullOrWhiteSpace(wakeResult.Address)
                         ? $"Сканер готов. Текущий сетевой адрес: {wakeResult.Address}."
@@ -1128,17 +1180,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException)
         {
-            ScanStatus = "Подключение к сканеру остановлено.";
+            if (wakeVersion == _scannerWakeVersion)
+            {
+                ScanStatus = "Подключение к сканеру остановлено.";
+            }
         }
         catch (Exception ex)
         {
-            ScanStatus = $"Не удалось пробудить сканер: {ex.Message}";
+            if (wakeVersion == _scannerWakeVersion)
+            {
+                ScanStatus = $"Не удалось пробудить сканер: {ex.Message}";
+            }
         }
         finally
         {
-            IsWakingScanner = false;
-            _scannerWakeCancellation?.Dispose();
-            _scannerWakeCancellation = null;
+            if (wakeVersion == _scannerWakeVersion)
+            {
+                IsWakingScanner = false;
+                if (ReferenceEquals(_scannerWakeCancellation, wakeCancellation))
+                {
+                    _scannerWakeCancellation = null;
+                }
+            }
+
+            wakeCancellation.Dispose();
         }
     }
 

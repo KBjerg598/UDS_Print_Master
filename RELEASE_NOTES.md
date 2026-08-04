@@ -1,9 +1,9 @@
-# UISI PrintMaster 0.1.0
+# UISI PrintMaster 0.1.1
 
-**Theme: First public release and automatic updates**
+**Theme: Reliable scanner reconnection and polished workspace**
 
-- Added a dedicated update center with automatic background checks.
-- Added secure installer-based updates powered by Velopack and GitHub Releases.
-- Added a visible update indicator in the main application header.
-- Rebuilt the Windows icon and header logo from the full-resolution UISI artwork.
-- Preserved the existing printing, conversion, scanning, and document preview workflows.
+- Scanner wake-up now starts automatically when the scanning workspace is opened.
+- The scanner refresh button now cancels the current connection attempt and immediately starts a fresh one.
+- Superseded WIA attempts can no longer overwrite the active connection status with stale timeout messages.
+- Refined the Material Design workspace with clearer tabs, tables, empty states, spacing, and responsive scan panels.
+- Added window dragging and double-click maximize or restore behavior to the application header.

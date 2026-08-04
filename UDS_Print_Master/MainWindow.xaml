@@ -4,10 +4,10 @@
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="UISI PrintMaster"
-        Width="1320"
-        Height="820"
-        MinWidth="1220"
-        MinHeight="740"
+        Width="1420"
+        Height="880"
+        MinWidth="1120"
+        MinHeight="720"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AppBackgroundBrush}"
         Icon="Assets/UISI-Logo-BW.ico"
@@ -23,10 +23,10 @@
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
 
         <Style x:Key="PanelTitle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontSize" Value="18" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{StaticResource AppInkBrush}" />
-            <Setter Property="Margin" Value="0,0,0,14" />
+            <Setter Property="Margin" Value="0,0,0,10" />
         </Style>
 
         <Style x:Key="SmallMutedText" TargetType="TextBlock">
@@ -46,8 +46,8 @@
         </Style>
 
         <Style x:Key="FileListActionsPanelStyle" TargetType="{x:Type WrapPanel}">
-            <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="Margin" Value="0,10,0,0" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="Margin" Value="0,12,0,0" />
         </Style>
 
         <Style x:Key="FileListActionButtonStyle" TargetType="Button" BasedOn="{StaticResource MaterialDesignOutlinedButton}">
@@ -94,19 +94,35 @@
             <Setter Property="CellStyle" Value="{StaticResource FilesGridCellStyle}" />
             <Setter Property="RowBackground" Value="#FFFFFF" />
             <Setter Property="AlternatingRowBackground" Value="#F8FAFC" />
+            <Setter Property="ColumnHeaderHeight" Value="40" />
+            <Setter Property="RowHeight" Value="42" />
+            <Setter Property="SelectionUnit" Value="FullRow" />
+            <Setter Property="CanUserResizeRows" Value="False" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <Style x:Key="EmptyStateBorderStyle" TargetType="Border">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Padding" Value="20" />
+            <Setter Property="Visibility" Value="Collapsed" />
         </Style>
     </Window.Resources>
 
-    <Grid Margin="18">
+    <Grid Margin="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="104" />
+            <RowDefinition Height="92" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <materialDesign:Card Grid.Row="0"
-                             Padding="20"
+                             Padding="16"
                              Background="{StaticResource AppSurfaceBrush}"
-                             materialDesign:ElevationAssist.Elevation="Dp3">
+                             UniformCornerRadius="8"
+                             MouseLeftButtonDown="WindowHeader_MouseLeftButtonDown"
+                             materialDesign:ElevationAssist.Elevation="Dp2">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -114,11 +130,11 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Border Width="68"
-                        Height="68"
+                <Border Width="56"
+                        Height="56"
                         Background="#111827"
-                        CornerRadius="16"
-                        Padding="7"
+                        CornerRadius="8"
+                        Padding="6"
                         VerticalAlignment="Center">
                     <Image Source="Assets/UISI-Logo-Header.png"
                            Stretch="Uniform"
@@ -126,16 +142,17 @@
                 </Border>
 
                 <StackPanel Grid.Column="1"
-                            Margin="16,0,0,0"
+                            Margin="14,0,16,0"
                             VerticalAlignment="Center">
                     <TextBlock Text="UISI PrintMaster"
-                               FontSize="28"
+                               FontSize="24"
                                FontWeight="Bold"
                                Foreground="{StaticResource AppInkBrush}" />
                     <TextBlock Text="Печать, конвертация и сканирование документов в одном рабочем пространстве"
                                Style="{StaticResource SmallMutedText}"
-                               FontSize="13"
-                               Margin="0,5,0,0" />
+                               FontSize="12"
+                               Margin="0,3,0,0"
+                               TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="2"
@@ -143,7 +160,7 @@
                             VerticalAlignment="Center">
                     <Button x:Name="UpdatesButton"
                             Margin="0,0,10,0"
-                            Padding="14,0"
+                            Padding="12,0"
                             Style="{StaticResource MaterialDesignOutlinedButton}"
                             Click="ShowUpdates_Click"
                             ToolTip="Центр обновлений">
@@ -186,24 +203,25 @@
             </Grid>
         </materialDesign:Card>
 
-        <Grid Grid.Row="1" Margin="0,16,0,0">
+        <Grid Grid.Row="1" Margin="0,14,0,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="360" />
+                <ColumnDefinition Width="336" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="390" />
+                <ColumnDefinition Width="360" />
             </Grid.ColumnDefinitions>
 
             <materialDesign:Card x:Name="PrintSettingsPanel"
                                  Grid.Column="0"
-                                 Padding="20"
+                                 Padding="18"
                                  Background="{StaticResource AppSurfaceBrush}"
+                                 UniformCornerRadius="8"
                                  materialDesign:ElevationAssist.Elevation="Dp2"
                                  Margin="0,0,16,0">
                 <Grid>
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               Padding="0">
-                    <StackPanel Margin="0,0,18,10">
+                    <StackPanel Margin="0,0,16,8">
                         <TextBlock Text="Параметры печати"
                                    Style="{StaticResource PanelTitle}" />
 
@@ -346,8 +364,9 @@
 
             <materialDesign:Card x:Name="WorkspacePanel"
                                  Grid.Column="1"
-                                 Padding="20"
+                                 Padding="18"
                                  Background="{StaticResource AppSurfaceBrush}"
+                                 UniformCornerRadius="8"
                                  materialDesign:ElevationAssist.Elevation="Dp2"
                                  Margin="0,0,16,0"
                                  AllowDrop="True"
@@ -357,7 +376,16 @@
                             SelectionChanged="MainWorkspaceTabs_SelectionChanged"
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch">
-                    <TabItem Header="Очередь печати">
+                    <TabItem>
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="FormatListBulleted"
+                                                         Width="18"
+                                                         Height="18"
+                                                         Margin="0,0,7,0" />
+                                <TextBlock Text="Печать" />
+                            </StackPanel>
+                        </TabItem.Header>
                 <Grid Margin="0,12,0,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -374,7 +402,7 @@
                             <TextBlock Text="Файлы для печати" Style="{StaticResource PanelTitle}" />
                             <TextBlock Text="{Binding FilesSummary}"
                                        Style="{StaticResource SmallMutedText}"
-                                       Margin="0,-7,0,0" />
+                                       Margin="0,-3,0,0" />
                         </StackPanel>
                         <WrapPanel Grid.Row="1" Style="{StaticResource FileListActionsPanelStyle}">
                             <Button Style="{StaticResource FileListActionButtonStyle}"
@@ -400,7 +428,7 @@
                             </Button>
                             <Button Style="{StaticResource FileListActionButtonStyle}"
                                     Click="ClearFiles_Click"
-                                    Foreground="#B91C1C">
+                                    Foreground="{StaticResource AppDangerBrush}">
                                 <StackPanel Orientation="Horizontal">
                                     <materialDesign:PackIcon Kind="DeleteSweep"
                                                              Width="19"
@@ -412,45 +440,68 @@
                         </WrapPanel>
                     </Grid>
 
-                    <DataGrid Grid.Row="1"
-                              x:Name="FilesGrid"
-                              ItemsSource="{Binding Files}"
-                              AutoGenerateColumns="False"
-                              CanUserAddRows="False"
-                              IsReadOnly="True"
-                              HeadersVisibility="Column"
-                              GridLinesVisibility="All"
-                              SelectionMode="Extended"
-                              SelectionChanged="FilesGrid_SelectionChanged"
-                              RowHeaderWidth="0"
-                              BorderThickness="1"
-                              Background="#FFFFFF"
-                              AlternationCount="2"
-                              Style="{StaticResource FilesDataGridStyle}">
-                        <DataGrid.Resources>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource FilesGridTextStyle}" />
-                        </DataGrid.Resources>
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Файл"
-                                                Binding="{Binding FileName}"
-                                                Width="2.2*" />
-                            <DataGridTextColumn Header="Тип"
-                                                Binding="{Binding Extension}"
-                                                Width="0.55*" />
-                            <DataGridTextColumn Header="Размер"
-                                                Binding="{Binding SizeLabel}"
-                                                Width="0.75*" />
-                            <DataGridTextColumn Header="Статус"
-                                                Binding="{Binding Status}"
-                                                Width="1*" />
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <Grid Grid.Row="1">
+                        <DataGrid x:Name="FilesGrid"
+                                  ItemsSource="{Binding Files}"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  IsReadOnly="True"
+                                  HeadersVisibility="Column"
+                                  GridLinesVisibility="All"
+                                  SelectionMode="Extended"
+                                  SelectionChanged="FilesGrid_SelectionChanged"
+                                  RowHeaderWidth="0"
+                                  BorderThickness="1"
+                                  Background="#FFFFFF"
+                                  AlternationCount="2"
+                                  Style="{StaticResource FilesDataGridStyle}">
+                            <DataGrid.Resources>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource FilesGridTextStyle}" />
+                            </DataGrid.Resources>
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Файл"
+                                                    Binding="{Binding FileName}"
+                                                    Width="2.2*" />
+                                <DataGridTextColumn Header="Тип"
+                                                    Binding="{Binding Extension}"
+                                                    Width="0.55*" />
+                                <DataGridTextColumn Header="Размер"
+                                                    Binding="{Binding SizeLabel}"
+                                                    Width="0.75*" />
+                                <DataGridTextColumn Header="Статус"
+                                                    Binding="{Binding Status}"
+                                                    Width="1*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Border>
+                            <Border.Style>
+                                <Style TargetType="Border" BasedOn="{StaticResource EmptyStateBorderStyle}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Files.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel HorizontalAlignment="Center">
+                                <materialDesign:PackIcon Kind="FileDocumentPlusOutline"
+                                                         Width="36"
+                                                         Height="36"
+                                                         HorizontalAlignment="Center"
+                                                         Foreground="#94A3B8" />
+                                <TextBlock Text="Очередь печати пуста"
+                                           Margin="0,10,0,0"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedBrush}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
 
                     <Border Grid.Row="2"
                             BorderBrush="{StaticResource AppLineBrush}"
                             BorderThickness="1"
                             Background="#F8FAFC"
-                            CornerRadius="12"
+                            CornerRadius="8"
                             Padding="10"
                             Margin="0,12,0,0"
                             HorizontalAlignment="Center"
@@ -479,7 +530,16 @@
                 </Grid>
                     </TabItem>
 
-                    <TabItem Header="Конвертация">
+                    <TabItem>
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="FileSwapOutline"
+                                                         Width="18"
+                                                         Height="18"
+                                                         Margin="0,0,7,0" />
+                                <TextBlock Text="Конвертация" />
+                            </StackPanel>
+                        </TabItem.Header>
                         <Grid Margin="0,12,0,0"
                               AllowDrop="True"
                               DragOver="Conversion_DragOver"
@@ -500,7 +560,7 @@
                                     <TextBlock Text="Конвертация в PDF" Style="{StaticResource PanelTitle}" />
                                     <TextBlock Text="{Binding ConversionSummary}"
                                                Style="{StaticResource SmallMutedText}"
-                                               Margin="0,-7,0,0" />
+                                               Margin="0,-3,0,0" />
                                 </StackPanel>
                                 <WrapPanel Grid.Row="1" Style="{StaticResource FileListActionsPanelStyle}">
                                     <Button Style="{StaticResource FileListActionButtonStyle}"
@@ -552,7 +612,7 @@
                                     BorderBrush="{StaticResource AppLineBrush}"
                                     BorderThickness="1"
                                     Background="#F8FAFC"
-                                    CornerRadius="14"
+                                    CornerRadius="8"
                                     Padding="14"
                                     Margin="0,14,0,12">
                                 <Grid>
@@ -579,44 +639,67 @@
                                 </Grid>
                             </Border>
 
-                            <DataGrid Grid.Row="2"
-                                      x:Name="ConversionFilesGrid"
-                                      ItemsSource="{Binding ConversionFiles}"
-                                      AutoGenerateColumns="False"
-                                      CanUserAddRows="False"
-                                      IsReadOnly="True"
-                                      HeadersVisibility="Column"
-                                      GridLinesVisibility="All"
-                                      SelectionMode="Extended"
-                                      RowHeaderWidth="0"
-                                      BorderThickness="1"
-                                      Background="#FFFFFF"
-                                      AlternationCount="2"
-                                      Style="{StaticResource FilesDataGridStyle}">
-                                <DataGrid.Resources>
-                                    <Style TargetType="TextBlock" BasedOn="{StaticResource FilesGridTextStyle}" />
-                                </DataGrid.Resources>
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Файл"
-                                                        Binding="{Binding FileName}"
-                                                        Width="2.5*" />
-                                    <DataGridTextColumn Header="Тип"
-                                                        Binding="{Binding Extension}"
-                                                        Width="0.6*" />
-                                    <DataGridTextColumn Header="Размер"
-                                                        Binding="{Binding SizeLabel}"
-                                                        Width="0.8*" />
-                                    <DataGridTextColumn Header="Статус"
-                                                        Binding="{Binding Status}"
-                                                        Width="1*" />
-                                </DataGrid.Columns>
-                            </DataGrid>
+                            <Grid Grid.Row="2">
+                                <DataGrid x:Name="ConversionFilesGrid"
+                                          ItemsSource="{Binding ConversionFiles}"
+                                          AutoGenerateColumns="False"
+                                          CanUserAddRows="False"
+                                          IsReadOnly="True"
+                                          HeadersVisibility="Column"
+                                          GridLinesVisibility="All"
+                                          SelectionMode="Extended"
+                                          RowHeaderWidth="0"
+                                          BorderThickness="1"
+                                          Background="#FFFFFF"
+                                          AlternationCount="2"
+                                          Style="{StaticResource FilesDataGridStyle}">
+                                    <DataGrid.Resources>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource FilesGridTextStyle}" />
+                                    </DataGrid.Resources>
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Файл"
+                                                            Binding="{Binding FileName}"
+                                                            Width="2.5*" />
+                                        <DataGridTextColumn Header="Тип"
+                                                            Binding="{Binding Extension}"
+                                                            Width="0.6*" />
+                                        <DataGridTextColumn Header="Размер"
+                                                            Binding="{Binding SizeLabel}"
+                                                            Width="0.8*" />
+                                        <DataGridTextColumn Header="Статус"
+                                                            Binding="{Binding Status}"
+                                                            Width="1*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <Border>
+                                    <Border.Style>
+                                        <Style TargetType="Border" BasedOn="{StaticResource EmptyStateBorderStyle}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ConversionFiles.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="FilePdfBox"
+                                                                 Width="36"
+                                                                 Height="36"
+                                                                 HorizontalAlignment="Center"
+                                                                 Foreground="#94A3B8" />
+                                        <TextBlock Text="Список конвертации пуст"
+                                                   Margin="0,10,0,0"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppMutedBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
 
                             <Border Grid.Row="3"
                                     BorderBrush="{StaticResource AppLineBrush}"
                                     BorderThickness="1"
                                     Background="#F8FAFC"
-                                    CornerRadius="12"
+                                    CornerRadius="8"
                                     Padding="10"
                                     Margin="0,12,0,0"
                                     HorizontalAlignment="Center"
@@ -645,14 +728,23 @@
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="Сканирование">
+                    <TabItem>
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="Scanner"
+                                                         Width="18"
+                                                         Height="18"
+                                                         Margin="0,0,7,0" />
+                                <TextBlock Text="Сканирование" />
+                            </StackPanel>
+                        </TabItem.Header>
                         <Grid Margin="0,12,0,0">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="300" />
+                                <ColumnDefinition Width="290" />
                                 <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="1.15*" MinWidth="300" />
                                 <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="420" />
+                                <ColumnDefinition Width="*" MinWidth="340" />
                             </Grid.ColumnDefinitions>
 
                             <Border Grid.Column="0"
@@ -662,7 +754,8 @@
                                     CornerRadius="8"
                                     Padding="16">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                              HorizontalScrollBarVisibility="Disabled">
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Padding="0,0,10,0">
                                     <StackPanel>
                                         <Grid Margin="0,0,0,8">
                                             <Grid.ColumnDefinitions>
@@ -677,10 +770,12 @@
                                                        VerticalAlignment="Center" />
                                             <Button Grid.Column="1"
                                                     HorizontalAlignment="Right"
+                                                    Width="40"
+                                                    Height="40"
                                                     Style="{StaticResource MaterialDesignIconButton}"
                                                     Click="RefreshScanners_Click"
-                                                    IsEnabled="{Binding CanWakeScanner}"
-                                                    ToolTip="Пробудить и обновить сканер">
+                                                    IsEnabled="{Binding CanRestartScannerConnection}"
+                                                    ToolTip="Заново подключить и обновить сканер">
                                                 <materialDesign:PackIcon Kind="Refresh"
                                                                          Width="21"
                                                                          Height="21" />
@@ -791,9 +886,27 @@
                                             </ProgressBar.Style>
                                         </ProgressBar>
 
-                                        <TextBlock Text="{Binding ScanStatus}"
-                                                   Style="{StaticResource SmallMutedText}"
-                                                   Margin="0,12,0,0" />
+                                        <Border Margin="0,12,0,0"
+                                                Padding="10"
+                                                Background="{StaticResource AppSubtleSurfaceBrush}"
+                                                BorderBrush="{StaticResource AppLineBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <materialDesign:PackIcon Kind="InformationOutline"
+                                                                         Width="17"
+                                                                         Height="17"
+                                                                         Margin="0,1,8,0"
+                                                                         Foreground="{StaticResource AppPrimaryBrush}" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding ScanStatus}"
+                                                           Style="{StaticResource SmallMutedText}" />
+                                            </Grid>
+                                        </Border>
                                     </StackPanel>
                                 </ScrollViewer>
                             </Border>
@@ -831,12 +944,18 @@
                                             Click="JoinScanDocument_Click"
                                             IsEnabled="{Binding CanEditScans}"
                                             ToolTip="Убрать разделитель перед выбранной страницей">
-                                        <TextBlock Text="Объединить с предыдущим" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="LinkVariant"
+                                                                     Width="18"
+                                                                     Height="18"
+                                                                     Margin="0,0,6,0" />
+                                            <TextBlock Text="Объединить" />
+                                        </StackPanel>
                                     </Button>
                                     <Button Style="{StaticResource FileListActionButtonStyle}"
                                             Click="DeleteSelectedScans_Click"
                                             IsEnabled="{Binding CanEditScans}"
-                                            Foreground="#B91C1C">
+                                            Foreground="{StaticResource AppDangerBrush}">
                                         <StackPanel Orientation="Horizontal">
                                             <materialDesign:PackIcon Kind="DeleteOutline"
                                                                      Width="18"
@@ -847,8 +966,15 @@
                                     </Button>
                                     <Button Style="{StaticResource FileListActionButtonStyle}"
                                             Click="ClearScans_Click"
-                                            IsEnabled="{Binding CanEditScans}">
-                                        <TextBlock Text="Очистить всё" />
+                                            IsEnabled="{Binding CanEditScans}"
+                                            Foreground="{StaticResource AppDangerBrush}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="DeleteSweepOutline"
+                                                                     Width="18"
+                                                                     Height="18"
+                                                                     Margin="0,0,6,0" />
+                                            <TextBlock Text="Очистить всё" />
+                                        </StackPanel>
                                     </Button>
                                 </WrapPanel>
 
@@ -858,6 +984,7 @@
                                         BorderThickness="1"
                                         CornerRadius="8"
                                         Padding="10">
+                                    <Grid>
                                     <ListBox x:Name="ScansList"
                                              ItemsSource="{Binding ScanPages}"
                                              SelectedItem="{Binding SelectedScanPage, Mode=TwoWay}"
@@ -924,7 +1051,7 @@
                                                                                      Width="16"
                                                                                      Height="16"
                                                                                      Margin="3,0,0,0"
-                                                                                     Foreground="#B91C1C"
+                                                                                     Foreground="{StaticResource AppDangerBrush}"
                                                                                      ToolTip="{Binding DocumentNameValidationMessage}"
                                                                                      VerticalAlignment="Center">
                                                                 <materialDesign:PackIcon.Style>
@@ -962,6 +1089,31 @@
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
+                                    <Border>
+                                        <Border.Style>
+                                            <Style TargetType="Border" BasedOn="{StaticResource EmptyStateBorderStyle}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ScanPages.Count}" Value="0">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <materialDesign:PackIcon Kind="ImageMultipleOutline"
+                                                                     Width="38"
+                                                                     Height="38"
+                                                                     HorizontalAlignment="Center"
+                                                                     Foreground="#94A3B8" />
+                                            <TextBlock Text="Отсканированных страниц пока нет"
+                                                       Margin="0,10,0,0"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource AppMutedBrush}"
+                                                       TextAlignment="Center"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    </Grid>
                                 </Border>
                             </Grid>
 
@@ -1076,8 +1228,9 @@
 
             <materialDesign:Card x:Name="PrintPreviewPanel"
                                  Grid.Column="2"
-                                 Padding="20"
+                                 Padding="18"
                                  Background="{StaticResource AppSurfaceBrush}"
+                                 UniformCornerRadius="8"
                                  materialDesign:ElevationAssist.Elevation="Dp2">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -1101,7 +1254,7 @@
                             Background="{StaticResource AppSoftBlueBrush}"
                             BorderBrush="#C7D7FE"
                             BorderThickness="1"
-                            CornerRadius="16"
+                            CornerRadius="8"
                             Padding="14"
                             Margin="0,0,0,12">
                         <StackPanel>
@@ -1109,7 +1262,7 @@
                                 <materialDesign:PackIcon Kind="PrinterCheck"
                                                          Width="22"
                                                          Height="22"
-                                                         Foreground="#1D4ED8"
+                                                         Foreground="{StaticResource AppPrimaryBrush}"
                                                          Margin="0,0,8,0" />
                                 <TextBlock Text="Сейчас печатается"
                                            Foreground="{StaticResource AppMutedBrush}"
@@ -1136,8 +1289,8 @@
                             Background="#E9EEF5"
                             BorderBrush="{StaticResource AppLineBrush}"
                             BorderThickness="1"
-                            CornerRadius="16"
-                            Padding="12">
+                            CornerRadius="8"
+                            Padding="10">
                         <Grid>
                             <Border x:Name="FlowPreviewHost"
                                     Background="#E9EEF5"
@@ -1197,7 +1350,7 @@
         </Grid>
 
         <Grid Grid.RowSpan="2"
-              Margin="-18"
+              Margin="-16"
               Panel.ZIndex="100"
               Background="#F8FAFC"
               Visibility="{Binding IsScanPreviewExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">

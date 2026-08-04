@@ -5,7 +5,7 @@ UISI PrintMaster uses Velopack for its Windows installer and in-app updates. The
 ## Local package
 
 ```powershell
-.\scripts\Build-Release.ps1 -Version 0.1.0 -Channel stable
+.\scripts\Build-Release.ps1 -Version 0.1.1 -Channel stable
 ```
 
 The script restores the pinned Velopack CLI, publishes a self-contained Windows build, and writes the installer and update packages to `artifacts/releases`.
