@@ -1,9 +1,9 @@
-# UISI PrintMaster 0.1.1
+# UISI PrintMaster 0.1.2
 
-**Theme: Reliable scanner reconnection and polished workspace**
+**Theme: Smaller scanned PDFs with selectable compression**
 
-- Scanner wake-up now starts automatically when the scanning workspace is opened.
-- The scanner refresh button now cancels the current connection attempt and immediately starts a fresh one.
-- Superseded WIA attempts can no longer overwrite the active connection status with stale timeout messages.
-- Refined the Material Design workspace with clearer tabs, tables, empty states, spacing, and responsive scan panels.
-- Added a dedicated Material Design title bar with the UISI logo, window dragging, and minimize, maximize, restore, and close controls across the main and update windows.
+- Added a Compression selector to scanning settings, with JPEG selected by default for smaller PDF files.
+- Added lossless Flate compression as an alternative for preserving all scanned image details.
+- Added an information tooltip explaining both compression methods and when compression is applied.
+- Compression is applied when saving PDFs while preserving scan resolution and page dimensions.
+- The same scanned pages can be saved with either method without scanning again.

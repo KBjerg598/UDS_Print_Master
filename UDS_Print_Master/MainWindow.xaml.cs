@@ -105,6 +105,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _selectedScanSource = "Flatbed";
     private string _selectedScanMode = "Simplex";
     private string _selectedScanColorMode = "Color";
+    private string _selectedScanCompression = "Jpeg";
     private int? _selectedScanDpi = 300;
     private string _scanStatus = "Выберите сканер и источник бумаги.";
     private string _scanBaseFileName = "Документ";
@@ -315,6 +316,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         set => SetProperty(ref _selectedScanDpi, value);
     }
 
+    public string SelectedScanCompression
+    {
+        get => _selectedScanCompression;
+        set => SetProperty(ref _selectedScanCompression, value);
+    }
+
     public string ScanStatus
     {
         get => _scanStatus;
@@ -420,6 +427,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public bool CanSaveScans => ScanPages.Count > 0 && !IsScanning && !IsSavingScans && !IsConverting;
 
+    public bool CanChangeScanCompression => !IsSavingScans;
+
     public bool CanEditScans => ScanPages.Count > 0 && !IsScanning && !IsSavingScans;
 
     public bool CanWakeScanner => !IsScanning && !IsSavingScans && !IsWakingScanner && !IsPrinting && !IsConverting;
@@ -505,6 +514,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(CanStartScan));
                 OnPropertyChanged(nameof(CanSaveScans));
+                OnPropertyChanged(nameof(CanChangeScanCompression));
                 OnPropertyChanged(nameof(CanEditScans));
                 OnPropertyChanged(nameof(CanConvert));
                 OnPropertyChanged(nameof(CanPrint));
@@ -1460,6 +1470,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         IsSavingScans = true;
+        var useJpegCompression = SelectedScanCompression == "Jpeg";
         var savedCount = 0;
 
         try
@@ -1473,7 +1484,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
                 try
                 {
-                    await SaveScanGroupAsPdfAsync(groups[index], outputPath);
+                    await SaveScanGroupAsPdfAsync(groups[index], outputPath, useJpegCompression);
                     savedCount++;
                 }
                 catch
@@ -1519,15 +1530,35 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return groups;
     }
 
-    private async Task SaveScanGroupAsPdfAsync(IReadOnlyList<ScanPageItem> pages, string outputPath)
+    private async Task SaveScanGroupAsPdfAsync(
+        IReadOnlyList<ScanPageItem> pages,
+        string outputPath,
+        bool useJpegCompression)
     {
         var tempFolder = Path.Combine(Path.GetTempPath(), "UISI PrintMaster", "ScanPdf");
         Directory.CreateDirectory(tempFolder);
-        var htmlPath = Path.Combine(tempFolder, $"scan-{Guid.NewGuid():N}.html");
+        var tempPrefix = Path.Combine(tempFolder, $"scan-{Guid.NewGuid():N}");
+        var htmlPath = tempPrefix + ".html";
+        var originalImagePaths = pages.Select(page => page.ImagePath).ToArray();
+        var jpegPaths = useJpegCompression
+            ? originalImagePaths.Select((_, index) => $"{tempPrefix}-{index}.jpg").ToArray()
+            : [];
 
         try
         {
-            await File.WriteAllTextAsync(htmlPath, BuildScanPdfHtml(pages), Encoding.UTF8);
+            if (useJpegCompression)
+            {
+                await Task.Run(() =>
+                {
+                    for (var index = 0; index < originalImagePaths.Length; index++)
+                    {
+                        EncodeScanAsJpeg(originalImagePaths[index], jpegPaths[index]);
+                    }
+                });
+            }
+
+            var imagePaths = useJpegCompression ? jpegPaths : originalImagePaths;
+            await File.WriteAllTextAsync(htmlPath, BuildScanPdfHtml(imagePaths), Encoding.UTF8);
             await ConversionPdfBrowser.EnsureCoreWebView2Async();
             await NavigateWebViewToUriAsync(ConversionPdfBrowser, new Uri(htmlPath).AbsoluteUri);
             await WaitForWebImagesAsync(ConversionPdfBrowser);
@@ -1556,14 +1587,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         finally
         {
             DeleteFileIfExists(htmlPath);
+            foreach (var jpegPath in jpegPaths)
+            {
+                DeleteFileIfExists(jpegPath);
+            }
         }
     }
 
-    private static string BuildScanPdfHtml(IReadOnlyList<ScanPageItem> pages)
+    private static void EncodeScanAsJpeg(string imagePath, string jpegPath)
     {
-        var pageMarkup = string.Join(Environment.NewLine, pages.Select(page =>
+        using var input = File.OpenRead(imagePath);
+        var bitmap = BitmapFrame.Create(input, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+        var encoder = new JpegBitmapEncoder { QualityLevel = 85 };
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output = File.Create(jpegPath);
+        encoder.Save(output);
+    }
+
+    private static string BuildScanPdfHtml(IEnumerable<string> imagePaths)
+    {
+        var pageMarkup = string.Join(Environment.NewLine, imagePaths.Select(imagePath =>
         {
-            var source = System.Net.WebUtility.HtmlEncode(new Uri(page.ImagePath).AbsoluteUri);
+            var source = System.Net.WebUtility.HtmlEncode(new Uri(imagePath).AbsoluteUri);
             return $"<section class=\"page\"><img src=\"{source}\" alt=\"\"></section>";
         }));
 

@@ -822,6 +822,45 @@
                                             <ComboBoxItem Content="Чёрно-белый" Tag="BlackAndWhite" />
                                         </ComboBox>
 
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox SelectedValue="{Binding SelectedScanCompression, Mode=TwoWay}"
+                                                      SelectedValuePath="Tag"
+                                                      IsEnabled="{Binding CanChangeScanCompression}"
+                                                      Style="{StaticResource SettingsComboBox}"
+                                                      Margin="0"
+                                                      materialDesign:HintAssist.Hint="Сжатие">
+                                                <ComboBoxItem Content="JPEG" Tag="Jpeg" />
+                                                <ComboBoxItem Content="Flate" Tag="Flate" />
+                                            </ComboBox>
+                                            <Border Grid.Column="1"
+                                                    Width="32"
+                                                    Height="32"
+                                                    Margin="4,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Background="Transparent"
+                                                    ToolTipService.InitialShowDelay="150"
+                                                    ToolTipService.ShowDuration="20000"
+                                                    AutomationProperties.Name="Справка о сжатии PDF">
+                                                <Border.ToolTip>
+                                                    <TextBlock MaxWidth="300" TextWrapping="Wrap">
+                                                        Сжатие применяется при сохранении PDF и не меняет выбранный DPI.<LineBreak/><LineBreak/>
+                                                        <Bold>JPEG</Bold> уменьшает файл. Часть мелких деталей изображения может потеряться.<LineBreak/><LineBreak/>
+                                                        <Bold>Flate</Bold> сохраняет изображение без потерь. Файл обычно больше.
+                                                    </TextBlock>
+                                                </Border.ToolTip>
+                                                <materialDesign:PackIcon Kind="InformationOutline"
+                                                                         Width="20"
+                                                                         Height="20"
+                                                                         HorizontalAlignment="Center"
+                                                                         VerticalAlignment="Center"
+                                                                         Foreground="{StaticResource AppMutedBrush}" />
+                                            </Border>
+                                        </Grid>
+
                                         <TextBox Text="{Binding ScanBaseFileName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                  Style="{StaticResource SettingsTextBox}"
                                                  materialDesign:HintAssist.Hint="Префикс новых документов" />
